@@ -1,3 +1,4 @@
+
 package com.edalenacademy.app;
 
 import android.app.Activity;
@@ -18,12 +19,15 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.FrameLayout;
 
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
 public class MainActivity extends Activity {
 
     private static final int FILE_CHOOSER_REQUEST = 1001;
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
+    private SwipeRefreshLayout swipeRefreshLayout;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,6 +52,8 @@ public class MainActivity extends Activity {
         }
 
         FrameLayout root = new FrameLayout(this);
+
+        swipeRefreshLayout = new SwipeRefreshLayout(this);
         webView = new WebView(this);
 
         FrameLayout.LayoutParams webViewParams =
@@ -56,7 +62,15 @@ public class MainActivity extends Activity {
                         FrameLayout.LayoutParams.MATCH_PARENT
                 );
 
-        root.addView(webView, webViewParams);
+        swipeRefreshLayout.addView(webView, webViewParams);
+
+        FrameLayout.LayoutParams swipeParams =
+                new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                );
+
+        root.addView(swipeRefreshLayout, swipeParams);
         setContentView(root);
 
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -81,6 +95,7 @@ public class MainActivity extends Activity {
         });
 
         WebSettings settings = webView.getSettings();
+
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
@@ -88,8 +103,30 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setLoadWithOverviewMode(false);
         settings.setUseWideViewPort(false);
+        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+        settings.setBuiltInZoomControls(false);
+        settings.setDisplayZoomControls(false);
 
-        webView.setWebViewClient(new WebViewClient());
+        webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+
+                if (swipeRefreshLayout != null) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
+            }
+        });
+
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            webView.reload();
+        });
+
+        swipeRefreshLayout.setOnChildScrollUpCallback(
+                (parent, child) -> webView.getScrollY() > 0
+        );
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
