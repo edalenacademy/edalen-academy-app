@@ -3,6 +3,7 @@ package com.edalenacademy.app;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -121,11 +122,21 @@ public class MainActivity extends Activity {
         });
 
         Button refreshButton = new Button(this);
-        refreshButton.setText("â†»");
-        refreshButton.setTextSize(22);
-        refreshButton.setTextColor(Color.rgb(25, 45, 75));
-        refreshButton.setBackgroundColor(Color.rgb(246, 243, 236));
+
+        refreshButton.setText("\u21BB");
+        refreshButton.setTextSize(23);
+        refreshButton.setTextColor(Color.WHITE);
+        refreshButton.setGravity(Gravity.CENTER);
+        refreshButton.setPadding(0, 0, 0, 0);
+        refreshButton.setMinWidth(0);
+        refreshButton.setMinHeight(0);
+        refreshButton.setAllCaps(false);
         refreshButton.setContentDescription("Refresh page");
+
+        GradientDrawable refreshBackground = new GradientDrawable();
+        refreshBackground.setShape(GradientDrawable.OVAL);
+        refreshBackground.setColor(Color.rgb(25, 45, 75));
+        refreshButton.setBackground(refreshBackground);
 
         refreshButton.setOnClickListener(view -> {
             if (webView != null) {
@@ -135,8 +146,8 @@ public class MainActivity extends Activity {
 
         FrameLayout.LayoutParams refreshParams =
                 new FrameLayout.LayoutParams(
-                        dpToPx(58),
-                        dpToPx(58),
+                        dpToPx(46),
+                        dpToPx(46),
                         Gravity.END | Gravity.BOTTOM
                 );
 
@@ -144,7 +155,7 @@ public class MainActivity extends Activity {
                 dpToPx(12),
                 dpToPx(12),
                 dpToPx(16),
-                dpToPx(16)
+                dpToPx(112)
         );
 
         root.addView(refreshButton, refreshParams);
