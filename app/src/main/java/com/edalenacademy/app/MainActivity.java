@@ -1,4 +1,3 @@
-
 package com.edalenacademy.app;
 
 import android.app.Activity;
@@ -24,10 +23,13 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 public class MainActivity extends Activity {
 
     private static final int FILE_CHOOSER_REQUEST = 1001;
+    private static final String APP_URL =
+            "file:///android_asset/index.html";
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
     private SwipeRefreshLayout swipeRefreshLayout;
+    private boolean isRefreshing = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -108,11 +110,51 @@ public class MainActivity extends Activity {
         settings.setDisplayZoomControls(false);
 
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        webView.setBackgroundColor(Color.WHITE);
 
         webView.setWebViewClient(new WebViewClient() {
+
+            @Override
+            public void onPageStarted(
+                    WebView view,
+                    String url,
+                    android.graphics.Bitmap favicon
+            ) {
+                super.onPageStarted(view, url, favicon);
+
+                isRefreshing = true;
+
+                if (swipeRefreshLayout != null) {
+                    swipeRefreshLayout.setRefreshing(true);
+                }
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+
+                isRefreshing = false;
+
+                if (swipeRefreshLayout != null) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
+            }
+
+            @Override
+            public void onReceivedError(
+                    WebView view,
+                    int errorCode,
+                    String description,
+                    String failingUrl
+            ) {
+                super.onReceivedError(
+                        view,
+                        errorCode,
+                        description,
+                        failingUrl
+                );
+
+                isRefreshing = false;
 
                 if (swipeRefreshLayout != null) {
                     swipeRefreshLayout.setRefreshing(false);
@@ -120,8 +162,15 @@ public class MainActivity extends Activity {
             }
         });
 
+        /*
+         * Refresh remains enabled.
+         * The guard prevents repeated refresh requests while the page
+         * is already loading, which can cause a blank or unstable screen.
+         */
+        swipeRefreshLayout.setEnabled(true);
+
         swipeRefreshLayout.setOnRefreshListener(() -> {
-            webView.reload();
+            refreshPageSafely();
         });
 
         swipeRefreshLayout.setOnChildScrollUpCallback(
@@ -147,7 +196,10 @@ public class MainActivity extends Activity {
                 intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
 
                 try {
-                    startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+                    startActivityForResult(
+                            intent,
+                            FILE_CHOOSER_REQUEST
+                    );
                 } catch (Exception exception) {
                     filePathCallback = null;
                     callback.onReceiveValue(null);
@@ -176,9 +228,7 @@ public class MainActivity extends Activity {
         refreshButton.setBackground(refreshBackground);
 
         refreshButton.setOnClickListener(view -> {
-            if (webView != null) {
-                webView.reload();
-            }
+            refreshPageSafely();
         });
 
         FrameLayout.LayoutParams refreshParams =
@@ -197,7 +247,25 @@ public class MainActivity extends Activity {
 
         root.addView(refreshButton, refreshParams);
 
-        webView.loadUrl("file:///android_asset/index.html");
+        webView.loadUrl(APP_URL);
+    }
+
+    private void refreshPageSafely() {
+        if (webView == null || isRefreshing) {
+            return;
+        }
+
+        isRefreshing = true;
+
+        if (swipeRefreshLayout != null) {
+            swipeRefreshLayout.setRefreshing(true);
+        }
+
+        webView.post(() -> {
+            if (webView != null) {
+                webView.reload();
+            }
+        });
     }
 
     @Override
@@ -227,7 +295,9 @@ public class MainActivity extends Activity {
     }
 
     private int dpToPx(int dp) {
-        float density = getResources().getDisplayMetrics().density;
+        float density =
+                getResources().getDisplayMetrics().density;
+
         return Math.round(dp * density);
     }
 
