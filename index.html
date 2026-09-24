@@ -1847,6 +1847,46 @@ body.theme-dark .db-wrap .progress-card {
   }
 }
 </style>
+
+<style id="edalen-professional-fixes">
+/* Professional mobile polish: focus mode, network diagnostics, and chat viewport. */
+body.professional-focus-mode .topbar-user,
+body.professional-focus-mode .floating-tutor,
+body.professional-focus-mode .tutor-fab-wrap,
+body.professional-focus-mode .side-collapse-btn{opacity:.16!important;pointer-events:none!important;}
+body.professional-focus-mode .sidebar{display:none!important;}
+body.professional-focus-mode .content{max-width:1120px;margin:0 auto;}
+.professional-focus-banner{position:fixed;top:calc(env(safe-area-inset-top) + 10px);left:50%;transform:translateX(-50%);z-index:10050;display:flex;align-items:center;gap:10px;max-width:calc(100vw - 24px);padding:9px 11px 9px 14px;border:1px solid rgba(31,111,80,.35);border-radius:999px;background:var(--paper-raised);color:var(--text);box-shadow:0 8px 28px rgba(20,33,61,.16);font:600 12px/1 var(--sans);}
+.professional-focus-banner button{border:0;border-radius:999px;background:var(--forest);color:#fff;padding:8px 11px;font:700 12px/1 var(--sans);cursor:pointer;}
+.professional-network-panel{position:fixed;inset:0;z-index:10060;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(10,18,30,.48);backdrop-filter:blur(4px);}
+.professional-network-card{width:min(100%,390px);border:1px solid var(--border);border-radius:18px;background:var(--paper-raised);color:var(--text);box-shadow:0 18px 55px rgba(0,0,0,.25);padding:20px;}
+.professional-network-card h3{margin:0 0 8px;font-size:20px;}
+.professional-network-card p{margin:8px 0;color:var(--text-soft);font-size:13px;line-height:1.55;}
+.professional-network-card .network-result{display:flex;align-items:center;gap:8px;margin:14px 0;padding:12px;border-radius:12px;background:var(--forest-wash);color:var(--text);font-weight:700;font-size:13px;}
+.professional-network-card .network-result.offline{background:var(--brick-wash);}
+.professional-network-card button{width:100%;border:0;border-radius:12px;padding:12px;background:var(--ink);color:#fff;font-weight:700;cursor:pointer;}
+body.chat-route .chat-page,
+body.chat-route .chat-page > .wa-chat-shell{height:calc(100dvh - 70px)!important;max-height:none!important;}
+body.chat-route .wa-chat-shell{border-radius:16px!important;box-shadow:0 8px 28px rgba(20,33,61,.10)!important;}
+body.chat-route .wa-chat-header{background:linear-gradient(135deg,#128c7e,#075e54)!important;border-bottom:0!important;color:#fff!important;}
+body.chat-route .wa-chat-title b,
+body.chat-route .wa-chat-title span{color:#fff!important;}
+body.chat-route .wa-chat-title span{opacity:.82;}
+body.chat-route .wa-header-btn,
+body.chat-route .wa-icon-btn{color:#fff!important;}
+body.chat-route .wa-chat-messages{scroll-behavior:smooth!important;overscroll-behavior-y:contain!important;}
+body.chat-route .wa-composer-wrap{position:sticky!important;bottom:0!important;padding:7px 8px max(7px,env(safe-area-inset-bottom))!important;background:#f0f2f5!important;border-top:1px solid #d8dadd!important;box-shadow:0 -5px 18px rgba(0,0,0,.07)!important;}
+body.chat-route .wa-composer{gap:7px!important;}
+body.chat-route .wa-input{font-size:16px!important;min-height:42px!important;}
+body.chat-route .wa-send-btn{background:#128c7e!important;box-shadow:0 3px 10px rgba(18,140,126,.22)!important;}
+@media(max-width:700px){
+  body.chat-route .wa-chat-shell{border-radius:0!important;}
+  body.chat-route .wa-chat-header{padding-top:max(8px,env(safe-area-inset-top))!important;height:calc(60px + env(safe-area-inset-top))!important;flex-basis:calc(60px + env(safe-area-inset-top))!important;}
+  body.chat-route .chat-page,
+  body.chat-route .chat-page > .wa-chat-shell{height:calc(100dvh - 70px)!important;}
+}
+</style>
+
 </head>
 <body>
 <div id="app"></div>
@@ -2564,7 +2604,7 @@ function render(skipCountsRefresh){
   var route = currentRoute();
   var __studyPrefs=studyPrefs();
   applyAppTheme(__studyPrefs.theme||'light');
-  document.body.classList.toggle('study-focus-mode',!!__studyPrefs.focus);
+  document.body.classList.toggle('study-focus-mode',!!__studyPrefs.focus); if(window.syncProfessionalFocusBanner) syncProfessionalFocusBanner();
   document.body.classList.remove('chat-route');
 
   /* Leaving the chat (or switching chat type) must release the microphone. */
@@ -6276,9 +6316,9 @@ async function loadPublicMessages(silent){
   if(AppState.publicMessagesLoading) return;
   AppState.publicMessagesLoading = true;
   try{
-    var res = await sb.from('public_messages').select('*').order('created_at', {ascending:true});
+    var res = await sb.from('public_messages').select('*').order('created_at', {ascending:false}).range(0,149);
     if(res.error) throw res.error;
-    var msgs = res.data || [];
+    var msgs = (res.data || []).slice().reverse();
 
     /* Keep a just-sent message briefly if a refresh races the insert or the
        server returns a temporarily incomplete result. */
@@ -6303,7 +6343,7 @@ async function loadPublicMessages(silent){
     AppState.publicReactions = reactions;
     cachePublicChat(msgs, reactions);
     if(currentRoute() === '#/chat'){
-      if(!publicChatPollHandle){ publicChatPollHandle = setInterval(function(){ loadPublicMessages(true); }, 8000); }
+      if(!publicChatPollHandle){ publicChatPollHandle = setInterval(function(){ loadPublicMessages(true); }, 12000); }
       if(!silent || changed){
         var scrollState = chatScrollState('publicChatMessages');
         if(isChatComposerFocused() && refreshChatMessagesInPlace('publicChatMessages')){
@@ -6743,9 +6783,10 @@ async function loadPrivateMessages(recipientId, silent){
   try{
     var res = await sb.from('private_messages').select('*')
       .or('and(sender_id.eq.'+me+',recipient_id.eq.'+recipientId+'),and(sender_id.eq.'+recipientId+',recipient_id.eq.'+me+')')
-      .order('created_at', {ascending:true});
+      .order('created_at', {ascending:false})
+      .range(0,149);
     if(res.error) throw res.error;
-    var msgs = res.data || [];
+    var msgs = (res.data || []).slice().reverse();
     var ids = msgs.map(function(m){ return m.id; });
     var reactionsRes = ids.length ? await sb.from('private_message_reactions').select('*').in('message_id', ids) : {data:[]};
     var reactions = groupReactions(reactionsRes.data || []);
@@ -6756,7 +6797,7 @@ async function loadPrivateMessages(recipientId, silent){
     cachePrivateChat(recipientId, msgs, reactions);
     if(msgCenterActivePartner() === recipientId){ msgCenterMarkRead(recipientId); msgCenterUpdateBadge(); }
     if(currentRoute() === '#/messages/'+recipientId){
-      if(!privateChatPollHandle){ privateChatPollHandle = setInterval(function(){ loadPrivateMessages(recipientId, true); }, 8000); }
+      if(!privateChatPollHandle){ privateChatPollHandle = setInterval(function(){ loadPrivateMessages(recipientId, true); }, 12000); }
       if(!silent || changed){
         var privateScrollState = chatScrollState('privateChatMessages');
         if(isChatComposerFocused() && refreshChatMessagesInPlace('privateChatMessages')){
@@ -8237,7 +8278,7 @@ document.addEventListener('submit', async function(e){
   else if(action === 'save-settings'){
     var su=getUser()||{}; var sp={reminders:!!$('#prefReminders').checked, compact:!!$('#prefCompact').checked, announcements:!!$('#prefAnnouncements').checked, focus:!!$('#prefFocus').checked, lowNetwork:!!$('#prefLowNetwork').checked, theme:$('#prefTheme').value||'light'};
     try{localStorage.setItem('edalen_prefs_'+su.id,JSON.stringify(sp));}catch(e){}
-    document.body.classList.toggle('compact-exam',sp.compact); document.body.classList.toggle('study-focus-mode',sp.focus); applyAppTheme(sp.theme); toast('Settings saved.'); render();
+    document.body.classList.toggle('compact-exam',sp.compact); setProfessionalFocusMode(sp.focus); applyAppTheme(sp.theme); toast('Settings saved.'); render();
   }
   else if(action === 'toggle-bookmark'){
     var exb=getCurrentExam(); if(exb&&exb.questions&&exb.questions[exb.current]){toggleStudyBookmark(exb.questions[exb.current],exb.subject);render(true);} 
@@ -8263,10 +8304,12 @@ document.addEventListener('submit', async function(e){
     var rid=actionEl.getAttribute('data-id'); saveRevisionReminders(getRevisionReminders().filter(function(r){return r.id!==rid;})); toast('Reminder deleted.'); render(true);
   }
   else if(action === 'study-focus-now'){
-    document.body.classList.toggle('study-focus-mode'); toast(document.body.classList.contains('study-focus-mode')?'Focus mode enabled.':'Focus mode disabled.');
+    var focusOn=!document.body.classList.contains('study-focus-mode');
+    setProfessionalFocusMode(focusOn);
+    toast(focusOn?'Focus mode enabled.':'Focus mode disabled.');
   }
   else if(action === 'study-network-check'){
-    toast(navigator.onLine?'You appear to be online.':'You appear to be offline. Please reconnect before loading a new question file.');
+    runProfessionalNetworkCheck();
   }
   else if(action === 'check-upload-health'){
     var hp=actionEl.getAttribute('data-path')||''; if(!hp){toast('This file has no B2 path in its metadata.');return;}
@@ -8649,5 +8692,497 @@ function showModal(title, body, confirmLabel, onConfirm){
 }
 
 </script>
+
+<script id="edalen-professional-fixes-js">
+(function(){
+  function removeProfessionalFocusBanner(){
+    var banner=document.getElementById('professionalFocusBanner');
+    if(banner) banner.remove();
+  }
+  window.setProfessionalFocusMode=function(enabled){
+    var on=!!enabled;
+    document.body.classList.toggle('study-focus-mode',on);
+    document.body.classList.toggle('professional-focus-mode',on);
+    removeProfessionalFocusBanner();
+    if(!on) return;
+    var banner=document.createElement('div');
+    banner.id='professionalFocusBanner';
+    banner.className='professional-focus-banner';
+    banner.innerHTML='<span>📖 Focus mode is on</span><button type="button" aria-label="Exit focus mode">Exit</button>';
+    banner.querySelector('button').addEventListener('click',function(){
+      setProfessionalFocusMode(false);
+      toast('Focus mode disabled.');
+    });
+    document.body.appendChild(banner);
+  };
+  window.syncProfessionalFocusBanner=function(){
+    if(document.body.classList.contains('study-focus-mode')){
+      setProfessionalFocusMode(true);
+    }else{
+      setProfessionalFocusMode(false);
+    }
+  };
+  window.runProfessionalNetworkCheck=function(){
+    var old=document.getElementById('professionalNetworkPanel');
+    if(old) old.remove();
+    var panel=document.createElement('div');
+    panel.id='professionalNetworkPanel';
+    panel.className='professional-network-panel';
+    panel.innerHTML='<div class="professional-network-card" role="dialog" aria-modal="true" aria-label="Network check"><h3>Network check</h3><p>Testing your connection before you start a study session.</p><div class="network-result">⏳ Checking connection…</div><p class="network-details"></p><button type="button">Close</button></div>';
+    document.body.appendChild(panel);
+    var result=panel.querySelector('.network-result');
+    var details=panel.querySelector('.network-details');
+    var close=function(){panel.remove();};
+    panel.querySelector('button').addEventListener('click',close);
+    panel.addEventListener('click',function(e){if(e.target===panel) close();});
+    var online=navigator.onLine!==false;
+    var started=Date.now();
+    var probe=window.fetch ? fetch(window.location.href,{method:'HEAD',cache:'no-store'}).then(function(){return true;}).catch(function(){return false;}) : Promise.resolve(online);
+    probe.then(function(ok){
+      var good=online && ok;
+      result.classList.toggle('offline',!good);
+      result.textContent=good?'🟢 Connection looks good':'🔴 Connection needs attention';
+      details.textContent=(online?'Device reports online. ':'Device reports offline. ')+(ok?'The app responded to a connectivity test. ':'The connectivity test did not complete. ')+'Check your mobile data/Wi‑Fi and try again. Test time: '+(Date.now()-started)+' ms.';
+    });
+  };
+})();
+</script>
+
+
+<style id="edalen-professional-suite-styles">
+/* EDALEN ACADEMY PROFESSIONAL SUITE */
+.edalen-pro-suite{margin:18px 0;display:grid;gap:14px}
+.edalen-pro-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.edalen-pro-head h3{margin:0;font-size:20px;letter-spacing:-.4px}
+.edalen-pro-head p{margin:4px 0 0;color:var(--text-soft);font-size:13px}
+.edalen-pro-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.edalen-pro-card{border:1px solid var(--border);border-radius:16px;background:var(--paper-raised);padding:15px;box-shadow:0 8px 24px rgba(20,35,55,.06);min-width:0}
+.edalen-pro-card h4{margin:0 0 6px;font-size:15px}
+.edalen-pro-card p{margin:0;color:var(--text-soft);font-size:13px;line-height:1.5}
+.edalen-pro-value{font-size:26px;font-weight:800;letter-spacing:-.8px;margin:4px 0}
+.edalen-pro-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.edalen-pro-btn{border:1px solid var(--border);border-radius:999px;background:var(--paper);color:var(--text);padding:9px 12px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.edalen-pro-btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+.edalen-pro-btn:focus-visible{outline:3px solid var(--amber);outline-offset:3px}
+.edalen-pro-list{display:grid;gap:8px;margin-top:10px}
+.edalen-pro-row{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--border);padding-top:9px;font-size:12px}
+.edalen-pro-row:first-child{border-top:0;padding-top:0}
+.edalen-pro-muted{color:var(--text-soft)}
+.edalen-pro-pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 8px;background:var(--paper);border:1px solid var(--border);font-size:11px;font-weight:700}
+.edalen-pro-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block}
+.edalen-pro-dot.offline{background:#ef4444}
+.edalen-pro-progress{height:8px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:10px}
+.edalen-pro-progress span{display:block;height:100%;width:0;background:linear-gradient(90deg,#16a34a,#84cc16);border-radius:999px;transition:width .3s ease}
+.edalen-pro-wide{grid-column:1/-1}
+.edalen-pro-alert{border:1px solid rgba(34,197,94,.35);background:rgba(34,197,94,.08);color:var(--text);border-radius:14px;padding:12px;font-size:12px;display:flex;gap:10px;align-items:flex-start}
+.edalen-pro-alert.warning{border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.08)}
+.edalen-pro-alert button{margin-left:auto;border:0;background:transparent;color:inherit;font-weight:800;cursor:pointer}
+.edalen-pro-overlay{position:fixed;inset:0;z-index:99999;background:rgba(10,16,25,.5);display:flex;align-items:flex-end;justify-content:center;padding:12px}
+.edalen-pro-modal{width:min(560px,100%);max-height:85dvh;overflow:auto;background:var(--paper-raised);color:var(--text);border:1px solid var(--border);border-radius:20px;padding:18px;box-shadow:0 20px 70px rgba(0,0,0,.3)}
+.edalen-pro-modal h3{margin:0 0 8px}
+.edalen-pro-modal p{color:var(--text-soft);font-size:13px;line-height:1.5}
+.edalen-pro-modal pre{white-space:pre-wrap;word-break:break-word;font-size:11px;background:var(--paper);border:1px solid var(--border);padding:10px;border-radius:10px;max-height:240px;overflow:auto}
+.edalen-offline-bar{position:fixed;left:12px;right:12px;bottom:12px;z-index:99990;display:none;align-items:center;gap:10px;padding:11px 13px;border-radius:14px;background:#7f1d1d;color:#fff;box-shadow:0 10px 35px rgba(0,0,0,.2);font-size:12px}
+.edalen-offline-bar button{margin-left:auto;border:1px solid rgba(255,255,255,.5);background:transparent;color:#fff;border-radius:999px;padding:6px 10px;font-weight:700}
+@media(max-width:560px){.edalen-pro-grid{grid-template-columns:1fr}.edalen-pro-card{padding:14px}.edalen-pro-wide{grid-column:auto}.edalen-pro-head h3{font-size:18px}}
+@media(prefers-reduced-motion:reduce){.edalen-pro-progress span{transition:none}}
+</style>
+
+<script id="edalen-professional-suite-script">
+(function(){
+  'use strict';
+  if(window.__edalenProfessionalSuiteLoaded) return;
+  window.__edalenProfessionalSuiteLoaded = true;
+
+  var SUITE_KEY = 'edalen_professional_suite_v1';
+  var ERROR_KEY = 'edalen_client_error_log_v1';
+  var LAST_KEY = 'edalen_last_learning_activity_v1';
+  var userKey = function(){
+    try{
+      var u = typeof getUser === 'function' ? getUser() : null;
+      return (u && (u.id || u.email || u.username)) || 'guest';
+    }catch(_){ return 'guest'; }
+  };
+  var scopedKey = function(base){ return base + '_' + String(userKey()).replace(/[^a-zA-Z0-9_-]/g,'_'); };
+  var read = function(key, fallback){
+    try{ var v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; }catch(_){ return fallback; }
+  };
+  var write = function(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch(_){} };
+  var safeEsc = function(value){
+    try{ return typeof esc === 'function' ? esc(String(value == null ? '' : value)) : String(value == null ? '' : value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+    catch(_){ return String(value == null ? '' : value); }
+  };
+  var go = function(route){
+    try{ if(typeof navigate === 'function') navigate(route); else location.hash = route; }catch(_){ location.hash = route; }
+  };
+  var say = function(message){ try{ if(typeof toast === 'function') toast(message); else console.info(message); }catch(_){} };
+  var actionButton = function(label, action, primary){ return '<button type="button" class="edalen-pro-btn'+(primary?' primary':'')+'" data-edalen-pro-action="'+action+'">'+safeEsc(label)+'</button>'; };
+
+  function suiteState(){ return read(scopedKey(SUITE_KEY), {streak:0,lastStudyDate:null,studyMinutes:0,achievements:[],schedule:[],notifications:false}); }
+  function saveSuiteState(state){ write(scopedKey(SUITE_KEY),state); }
+  function todayKey(){ return new Date().toISOString().slice(0,10); }
+  function updateStreak(){
+    var state = suiteState();
+    var today = todayKey();
+    if(state.lastStudyDate === today) return state;
+    var previous = new Date(); previous.setDate(previous.getDate()-1);
+    var yesterday = previous.toISOString().slice(0,10);
+    state.streak = state.lastStudyDate === yesterday ? Number(state.streak||0)+1 : 1;
+    state.lastStudyDate = today;
+    state.achievements = state.achievements || [];
+    if(state.streak >= 3 && state.achievements.indexOf('3-day streak') < 0) state.achievements.push('3-day streak');
+    if(state.streak >= 7 && state.achievements.indexOf('7-day streak') < 0) state.achievements.push('7-day streak');
+    saveSuiteState(state);
+    return state;
+  }
+  function attempts(){ try{ return typeof getAttempts === 'function' ? (getAttempts() || []) : []; }catch(_){ return []; } }
+  function progressData(){
+    var list = attempts();
+    var total = list.length;
+    var score = list.reduce(function(sum,a){ return sum + (Number(a.score)||0); },0);
+    var possible = list.reduce(function(sum,a){ return sum + (Number(a.total)||0); },0);
+    return {total:total,percent:possible ? Math.round(score/possible*100) : 0,score:score,possible:possible,last:list[0]||null};
+  }
+  function lastActivity(){ return read(scopedKey(LAST_KEY),null); }
+  function dailyChallenge(){
+    var prompts = [
+      'Revise one difficult topic before starting a new mock test.',
+      'Attempt 10 objective questions and review every mistake.',
+      'Explain one concept aloud as if you were teaching a classmate.',
+      'Return to your weakest subject and practise for 15 minutes.',
+      'Review yesterday’s mistakes before attempting fresh questions.'
+    ];
+    var n = Number(todayKey().replace(/-/g,'')) % prompts.length;
+    return prompts[n];
+  }
+  function scheduleRows(){
+    var state = suiteState();
+    var rows = state.schedule || [];
+    if(!rows.length) return '<div class="edalen-pro-muted">No personal study plan yet.</div>';
+    return rows.slice(0,4).map(function(row){ return '<div class="edalen-pro-row"><span><b>'+safeEsc(row.subject||'Study session')+'</b><br><span class="edalen-pro-muted">'+safeEsc(row.time||'Flexible time')+'</span></span><span class="edalen-pro-pill">'+safeEsc(row.duration||'20 min')+'</span></div>'; }).join('');
+  }
+  function renderSuite(){
+    var app = document.querySelector('#app');
+    if(!app || !document.body || !location.hash.match(/^#\/(dashboard)?(?:$|\?)/)) return;
+    if(document.querySelector('[data-edalen-professional-suite]')) return;
+    var state = updateStreak();
+    var p = progressData();
+    var last = lastActivity() || p.last;
+    var online = navigator.onLine !== false;
+    var achievements = (state.achievements||[]).length;
+    var host = document.createElement('section');
+    host.className = 'edalen-pro-suite';
+    host.setAttribute('data-edalen-professional-suite','true');
+    host.innerHTML =
+      '<div class="edalen-pro-head"><div><h3>Academy professional hub</h3><p>Your study activity, progress and quick tools in one place.</p></div><span class="edalen-pro-pill"><span class="edalen-pro-dot '+(online?'':'offline')+'"></span>'+(online?'Online':'Offline')+'</span></div>'+
+      '<div class="edalen-pro-grid">'+
+        '<div class="edalen-pro-card"><h4>🔥 Study streak</h4><div class="edalen-pro-value">'+state.streak+' day'+(state.streak===1?'':'s')+'</div><p>Keep showing up consistently. Your streak is saved on this device.</p>'+actionButton('View reminders','reminders',false)+'</div>'+ 
+        '<div class="edalen-pro-card"><h4>📊 Learning progress</h4><div class="edalen-pro-value">'+p.percent+'%</div><p>'+p.total+' recorded attempt'+(p.total===1?'':'s')+' in your current activity history.</p><div class="edalen-pro-progress"><span style="width:'+Math.max(0,Math.min(100,p.percent))+'%"></span></div>'+actionButton('Open insights','insights',false)+'</div>'+ 
+        '<div class="edalen-pro-card"><h4>▶ Continue studying</h4><p>'+(last ? safeEsc(last.subject||last.title||'Your recent study session') : 'You have no recent saved session yet.')+'</p><div class="edalen-pro-actions">'+(last?actionButton('Open history','history',true):actionButton('Start practice','practice',true))+actionButton('Study toolkit','settings',false)+'</div></div>'+ 
+        '<div class="edalen-pro-card"><h4>🏅 Achievements</h4><div class="edalen-pro-value">'+achievements+'</div><p>'+(achievements?'Milestones unlocked. Keep building your learning record.':'Complete consistent study sessions to unlock milestones.')+'</p>'+actionButton('View milestones','achievements',false)+'</div>'+ 
+        '<div class="edalen-pro-card edalen-pro-wide"><h4>🧠 Question of the day</h4><p>'+safeEsc(dailyChallenge())+'</p><div class="edalen-pro-actions">'+actionButton('Start daily practice','practice',true)+actionButton('Search questions','search',false)+'</div></div>'+ 
+        '<div class="edalen-pro-card"><h4>🗓️ Study plan</h4><div class="edalen-pro-list">'+scheduleRows()+'</div><div class="edalen-pro-actions">'+actionButton('Plan revision','reminders',true)+actionButton('Edit plan','plan',false)+'</div></div>'+ 
+        '<div class="edalen-pro-card"><h4>🔔 Notifications</h4><p>Enable browser alerts for supported academy reminders and announcements.</p><div class="edalen-pro-actions">'+actionButton('Enable alerts','notifications',true)+actionButton('Open notifications','notification-page',false)+'</div></div>'+ 
+        '<div class="edalen-pro-card edalen-pro-wide"><h4>🛡️ Reliability and security</h4><p>Check your connection, review local error diagnostics, and open account security settings. Supabase permission enforcement must remain configured in the database.</p><div class="edalen-pro-actions">'+actionButton('Network check','network',false)+actionButton('Account security','profile',false)+actionButton('System diagnostics','diagnostics',false)+'</div></div>'+ 
+      '</div>'+
+      '<div class="edalen-pro-alert '+(online?'':'warning')+'"><span>'+(online?'✓':'⚠')+'</span><span>'+(online?'Your device reports an active connection. Keep retrying failed actions instead of leaving the page.':'You appear to be offline. Drafts and local study progress can remain on this device until connection returns.')+'</span></div>';
+    var target = app.querySelector('.dashboard-content') || app.firstElementChild || app;
+    target.appendChild(host);
+  }
+  function openModal(title, body, buttons){
+    var old = document.querySelector('.edalen-pro-overlay'); if(old) old.remove();
+    var overlay = document.createElement('div'); overlay.className='edalen-pro-overlay';
+    var modal = document.createElement('div'); modal.className='edalen-pro-modal';
+    modal.innerHTML='<h3>'+safeEsc(title)+'</h3>'+body+'<div class="edalen-pro-actions" style="justify-content:flex-end">'+(buttons||actionButton('Close','close-modal',true))+'</div>';
+    overlay.appendChild(modal); document.body.appendChild(overlay);
+    overlay.addEventListener('click',function(e){if(e.target===overlay) overlay.remove();});
+    return overlay;
+  }
+  function enableNotifications(){
+    if(!('Notification' in window)){ say('Notifications are not supported by this browser.'); return; }
+    Notification.requestPermission().then(function(result){
+      var state=suiteState(); state.notifications=result==='granted'; saveSuiteState(state);
+      say(result==='granted'?'Notifications enabled.':'Notification permission was not granted.');
+    }).catch(function(){say('Could not request notification permission.');});
+  }
+  function editPlan(){
+    var state=suiteState();
+    openModal('Create a study plan','<p>Add a simple personal study slot. This is saved locally on this device.</p><label style="display:block;font-size:12px;font-weight:700">Subject<input id="edalenPlanSubject" class="input" style="width:100%;margin-top:6px" placeholder="Mathematics"></label><label style="display:block;font-size:12px;font-weight:700;margin-top:10px">Time<input id="edalenPlanTime" class="input" style="width:100%;margin-top:6px" placeholder="6:00 PM"></label><label style="display:block;font-size:12px;font-weight:700;margin-top:10px">Duration<input id="edalenPlanDuration" class="input" style="width:100%;margin-top:6px" placeholder="30 min"></label>',actionButton('Save plan','save-plan',true)+actionButton('Cancel','close-modal',false));
+  }
+  function savePlan(){
+    var subject=document.getElementById('edalenPlanSubject'); var time=document.getElementById('edalenPlanTime'); var duration=document.getElementById('edalenPlanDuration');
+    if(!subject || !subject.value.trim()){say('Add a subject first.');return;}
+    var state=suiteState(); state.schedule=state.schedule||[]; state.schedule.unshift({subject:subject.value.trim(),time:time.value.trim()||'Flexible time',duration:duration.value.trim()||'20 min'}); state.schedule=state.schedule.slice(0,8); saveSuiteState(state); var modal=document.querySelector('.edalen-pro-overlay'); if(modal) modal.remove(); say('Study plan saved.'); scheduleSuiteRefresh();
+  }
+  function diagnostics(){
+    var errors=read(ERROR_KEY,[]); var online=navigator.onLine!==false;
+    var body='<p>Device connection: <b>'+(online?'Online':'Offline')+'</b></p><p>Saved client errors: <b>'+errors.length+'</b></p><p>These diagnostics are stored locally and do not replace Supabase server logs.</p><pre>'+safeEsc(JSON.stringify(errors.slice(-20),null,2))+'</pre>';
+    openModal('System diagnostics',body,actionButton('Clear local errors','clear-errors',false)+actionButton('Close','close-modal',true));
+  }
+  function achievements(){
+    var state=suiteState(); var list=(state.achievements||[]); var body='<p>Milestones saved on this device:</p>'+(list.length?'<div class="edalen-pro-list">'+list.map(function(x){return '<div class="edalen-pro-row"><span>🏅 '+safeEsc(x)+'</span><span class="edalen-pro-pill">Unlocked</span></div>';}).join('')+'</div>':'<p>No milestones yet. Build a study streak and keep practising.</p>');
+    openModal('Your milestones',body,actionButton('Close','close-modal',true));
+  }
+  function scheduleSuiteRefresh(){
+    var old=document.querySelector('[data-edalen-professional-suite]'); if(old) old.remove(); renderSuite();
+  }
+  function retryCurrent(){
+    try{ if(typeof render==='function') render(); else location.reload(); }catch(_){ location.reload(); }
+  }
+  function logError(kind,detail){
+    var errors=read(ERROR_KEY,[]); errors.push({kind:kind,message:String(detail||''),url:location.href,time:new Date().toISOString()}); write(ERROR_KEY,errors.slice(-50));
+  }
+  window.addEventListener('error',function(e){logError('error',e.message||'Unknown error');});
+  window.addEventListener('unhandledrejection',function(e){logError('promise',e.reason && (e.reason.message||e.reason) || 'Unhandled promise rejection');});
+  window.addEventListener('online',function(){updateOfflineBar();say('Connection restored.');});
+  window.addEventListener('offline',function(){updateOfflineBar();say('You are offline.');});
+  function updateOfflineBar(){
+    var bar=document.querySelector('.edalen-offline-bar'); if(!bar){bar=document.createElement('div');bar.className='edalen-offline-bar';bar.innerHTML='<span>⚠ You are offline. Some live actions may need a retry.</span><button type="button" data-edalen-pro-action="retry">Retry</button>';document.body.appendChild(bar);}
+    bar.style.display=navigator.onLine===false?'flex':'none';
+  }
+  document.addEventListener('click',function(e){
+    var button=e.target.closest ? e.target.closest('[data-edalen-pro-action]') : null; if(!button) return;
+    var action=button.getAttribute('data-edalen-pro-action');
+    if(action==='reminders') go('#/study/reminders');
+    else if(action==='insights') go('#/insights');
+    else if(action==='history') go('#/history');
+    else if(action==='practice') go('#/practice/setup');
+    else if(action==='settings') go('#/settings');
+    else if(action==='search') go('#/study/search');
+    else if(action==='notification-page') go('#/notifications');
+    else if(action==='profile') go('#/profile');
+    else if(action==='network') { try{ if(typeof runProfessionalNetworkCheck==='function') runProfessionalNetworkCheck(); else if(typeof openProfessionalNetworkCheck==='function') openProfessionalNetworkCheck(); else if(typeof showNetworkCheck==='function') showNetworkCheck(); else say(navigator.onLine?'Connection appears active.':'You are offline.'); }catch(_){say(navigator.onLine?'Connection appears active.':'You are offline.');} }
+    else if(action==='notifications') enableNotifications();
+    else if(action==='diagnostics') diagnostics();
+    else if(action==='achievements') achievements();
+    else if(action==='plan') editPlan();
+    else if(action==='save-plan') savePlan();
+    else if(action==='clear-errors'){write(ERROR_KEY,[]);var overlay=button.closest('.edalen-pro-overlay');if(overlay)overlay.remove();say('Local error history cleared.');}
+    else if(action==='retry') retryCurrent();
+    else if(action==='close-modal'){var overlay=button.closest('.edalen-pro-overlay');if(overlay)overlay.remove();}
+  },true);
+
+  /* Store a lightweight last-activity record when the user starts a known study route. */
+  window.addEventListener('hashchange',function(){
+    var route=location.hash||'';
+    if(route.indexOf('#/practice')===0 || route.indexOf('#/exam')===0 || route.indexOf('#/study')===0){
+      write(scopedKey(LAST_KEY),{route:route,subject:'Study session',at:new Date().toISOString()});
+    }
+    setTimeout(function(){updateOfflineBar();renderSuite();},180);
+  });
+
+  var observer = new MutationObserver(function(){
+    if(location.hash==='#/dashboard' || location.hash==='#/dashboard/' || location.hash==='' || location.hash==='#/') setTimeout(renderSuite,80);
+  });
+  var app=document.querySelector('#app'); if(app) observer.observe(app,{childList:true,subtree:true});
+  setTimeout(function(){updateOfflineBar();renderSuite();},450);
+})();
+</script>
+
+
+<!-- Edalen targeted reliability patch: fixes study-tool taps and reduces mobile chat load. -->
+<style id="edalen-targeted-reliability-css">
+  body{ -webkit-tap-highlight-color:transparent; }
+  button, a, input, textarea, select{ touch-action:manipulation; }
+  .wa-chat-shell{ isolation:isolate; }
+  .wa-chat-messages{
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+    scroll-behavior:auto;
+  }
+  .wa-bubble{ contain:layout paint; }
+  .wa-chat-messages img,
+  .wa-chat-messages video{
+    max-width:100%;
+    height:auto;
+  }
+  .edalen-fixed-action-busy{ opacity:.65; pointer-events:none; }
+</style>
+<script id="edalen-targeted-reliability-js">
+(function(){
+  'use strict';
+
+  function safeRender(){
+    try{ render(true); }catch(_){ try{ render(); }catch(__){} }
+  }
+
+  function actionName(el){
+    return el && el.getAttribute ? el.getAttribute('data-action') : '';
+  }
+
+  function handleStudyAction(e){
+    var el=e.target && e.target.closest ? e.target.closest('[data-action]') : null;
+    if(!el) return false;
+
+    var action=actionName(el);
+    var supported={
+      'toggle-bookmark':true,
+      'bookmark-bank-question':true,
+      'remove-bookmark':true,
+      'save-reminder':true,
+      'study-focus-now':true,
+      'study-network-check':true
+    };
+    if(!supported[action]) return false;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    if(el.dataset && el.dataset.fixedHandled==='1') return true;
+    if(el.dataset) el.dataset.fixedHandled='1';
+    setTimeout(function(){
+      try{ if(el.dataset) delete el.dataset.fixedHandled; }catch(_){}
+    },450);
+
+    if(action==='toggle-bookmark'){
+      var exam=getCurrentExam();
+      if(exam && exam.questions && exam.questions[exam.current]){
+        toggleStudyBookmark(exam.questions[exam.current],exam.subject);
+        safeRender();
+      }else{
+        toast('Open a practice question before saving it.');
+      }
+      return true;
+    }
+
+    if(action==='bookmark-bank-question'){
+      var subject=el.getAttribute('data-subject')||'';
+      var index=parseInt(el.getAttribute('data-index'),10);
+      var bank=(getBanks()[subject]||[]);
+      var question=bank[index];
+      if(question){
+        toggleStudyBookmark(question,subject);
+        safeRender();
+      }else{
+        toast('That question could not be found.');
+      }
+      return true;
+    }
+
+    if(action==='remove-bookmark'){
+      var key=el.getAttribute('data-key')||'';
+      saveStudyBookmarks(getStudyBookmarks().filter(function(row){return row.key!==key;}));
+      toast('Bookmark removed.');
+      safeRender();
+      return true;
+    }
+
+    if(action==='save-reminder'){
+      var titleEl=document.getElementById('reminderTitle');
+      var subjectEl=document.getElementById('reminderSubject');
+      var dateEl=document.getElementById('reminderDate');
+      var title=((titleEl&&titleEl.value)||'').trim();
+      var subject=((subjectEl&&subjectEl.value)||'').trim();
+      var date=((dateEl&&dateEl.value)||'').trim();
+
+      if(!title || !date){
+        toast('Add a reminder title and date.');
+        return true;
+      }
+
+      el.classList.add('edalen-fixed-action-busy');
+      el.disabled=true;
+      try{
+        var reminders=getRevisionReminders();
+        reminders.unshift({
+          id:uid(),
+          title:title,
+          subject:subject,
+          date:date,
+          createdAt:nowISO()
+        });
+        saveRevisionReminders(reminders);
+        toast('Revision reminder saved.');
+        safeRender();
+      }catch(err){
+        toast('Could not save reminder. Please try again.');
+      }finally{
+        el.disabled=false;
+        el.classList.remove('edalen-fixed-action-busy');
+      }
+      return true;
+    }
+
+    if(action==='study-focus-now'){
+      var enabled=!document.body.classList.contains('study-focus-mode');
+      if(typeof window.setProfessionalFocusMode==='function'){
+        window.setProfessionalFocusMode(enabled);
+      }else{
+        document.body.classList.toggle('study-focus-mode',enabled);
+        document.body.classList.toggle('professional-focus-mode',enabled);
+      }
+      toast(enabled?'Focus mode enabled.':'Focus mode disabled.');
+      return true;
+    }
+
+    if(action==='study-network-check'){
+      if(typeof window.runProfessionalNetworkCheck==='function'){
+        window.runProfessionalNetworkCheck();
+      }else{
+        toast(navigator.onLine===false?'Your device appears offline.':'Your device reports that it is online.');
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  /* Capture the study-tool actions before older delegated handlers can miss them. */
+  document.addEventListener('click',handleStudyAction,true);
+
+  /* The original check uses file:///android_asset/index.html as its HEAD target,
+     which is not a real network endpoint inside the Android WebView. */
+  window.runProfessionalNetworkCheck=function(){
+    var old=document.getElementById('professionalNetworkPanel');
+    if(old) old.remove();
+
+    var panel=document.createElement('div');
+    panel.id='professionalNetworkPanel';
+    panel.className='professional-network-panel';
+    panel.innerHTML=
+      '<div class="professional-network-card" role="dialog" aria-modal="true" aria-label="Network check">'+
+      '<h3>Network check</h3>'+
+      '<p>Testing your connection before you start a study session.</p>'+
+      '<div class="network-result">⏳ Checking connection…</div>'+
+      '<p class="network-details"></p>'+
+      '<button type="button">Close</button></div>';
+
+    document.body.appendChild(panel);
+
+    var result=panel.querySelector('.network-result');
+    var details=panel.querySelector('.network-details');
+    var close=function(){panel.remove();};
+    panel.querySelector('button').addEventListener('click',close);
+    panel.addEventListener('click',function(e){if(e.target===panel)close();});
+
+    var online=navigator.onLine!==false;
+    var probeUrl='https://www.gstatic.com/generate_204';
+    var started=Date.now();
+
+    var probe;
+    if(!online){
+      probe=Promise.resolve(false);
+    }else if(window.fetch){
+      probe=Promise.race([
+        fetch(probeUrl,{method:'GET',mode:'no-cors',cache:'no-store'}).then(function(){return true;}).catch(function(){return false;}),
+        new Promise(function(resolve){setTimeout(function(){resolve(false);},4500);})
+      ]);
+    }else{
+      probe=Promise.resolve(online);
+    }
+
+    probe.then(function(ok){
+      var good=online && ok;
+      result.classList.toggle('offline',!good);
+      result.textContent=good?'🟢 Connection looks good':'🔴 Connection needs attention';
+      details.textContent=
+        (online?'Device reports online. ':'Device reports offline. ')+
+        (ok?'The connectivity test completed. ':'The connectivity test did not complete. ')+
+        'Check your mobile data/Wi‑Fi and try again. Test time: '+(Date.now()-started)+' ms.';
+    });
+  };
+})();
+</script>
+
 </body>
 </html>
