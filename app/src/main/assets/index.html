@@ -6477,15 +6477,41 @@ function showCreatePollModal(){
     var n=box.querySelectorAll('.poll-option-input').length+1, inp=document.createElement('input');
     inp.className='poll-option-input'; inp.placeholder='Option '+n; inp.style.cssText='width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;margin-bottom:8px;background:var(--paper);color:var(--ink);'; box.appendChild(inp);
   };
-  overlay.querySelector('#pollCancel').onclick=function(){overlay.remove();};
   overlay.querySelector('#pollCreate').onclick=async function(){
     var q=overlay.querySelector('#pollQuestionInput').value.trim();
     var opts=Array.from(box.querySelectorAll('.poll-option-input')).map(function(x){return x.value.trim();}).filter(Boolean);
-    if(!q || opts.length<2){ toast('Add a question and at least 2 options.'); return; }
-    var res=await sb.from('public_polls').insert({question:q,options:opts,created_by:AppState.user.id}).select().single();
-    if(res.error){ toast('Could not create poll: '+res.error.message); return; }
-    AppState.publicPolls=(AppState.publicPolls||[]).concat([res.data]); overlay.remove(); render(); scrollChatToBottom('publicChatMessages');
-  };
+
+    if(!q || opts.length<2){
+        toast('Add a question and at least 2 options.');
+        return;
+    }
+
+    var createBtn=overlay.querySelector('#pollCreate');
+    createBtn.disabled=true;
+
+    try{
+        var res=await sb.from('public_polls')
+            .insert({question:q,options:opts,created_by:AppState.user.id})
+            .select()
+            .single();
+
+        if(res.error){
+            toast('Could not create poll: '+res.error.message);
+            overlay.remove();
+            return;
+        }
+
+        AppState.publicPolls=(AppState.publicPolls||[]).concat([res.data]);
+        overlay.remove();
+        render();
+        scrollChatToBottom('publicChatMessages');
+
+    }catch(err){
+        console.error('Poll creation failed:',err);
+        toast('Could not create poll. Please try again.');
+        overlay.remove();
+    }
+};
   setTimeout(function(){overlay.querySelector('#pollQuestionInput').focus();},0);
 }
 
