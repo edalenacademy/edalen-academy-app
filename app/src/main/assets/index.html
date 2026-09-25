@@ -6383,6 +6383,7 @@ function refreshChatMessagesInPlace(id){
 async function loadPublicMessages(silent){
   if(AppState.publicMessagesLoading) return;
   AppState.publicMessagesLoading = true;
+  if(currentRoute() === '#/chat') startPublicChatRealtime();
   try{
     var res = await sb.from('public_messages').select('*').order('created_at', {ascending:true});
     if(res.error) throw res.error;
