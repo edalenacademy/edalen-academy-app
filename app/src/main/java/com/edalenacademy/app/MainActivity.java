@@ -1,5 +1,7 @@
 package com.edalenacademy.app;
-
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.webkit.PermissionRequest;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
@@ -30,6 +32,8 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> filePathCallback;
     private SwipeRefreshLayout swipeRefreshLayout;
     private boolean isRefreshing = false;
+    private PermissionRequest pendingPermissionRequest;
+private static final int MEDIA_PERMISSION_REQUEST = 2001;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -179,6 +183,42 @@ public class MainActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+public void onPermissionRequest(PermissionRequest request) {
+    runOnUiThread(() -> {
+        String[] resources = request.getResources();
+
+        boolean needsCamera = false;
+        boolean needsAudio = false;
+
+        for (String resource : resources) {
+            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                needsCamera = true;
+            }
+
+            if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+                needsAudio = true;
+            }
+        }
+
+        boolean cameraAllowed =
+                !needsCamera ||
+                checkSelfPermission(Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED;
+
+        boolean microphoneAllowed =
+                !needsAudio ||
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED;
+
+        if (cameraAllowed && microphoneAllowed) {
+            request.grant(resources);
+        } else {
+            pendingPermissionRequest = request;
+            requestMediaPermissions(needsCamera, needsAudio);
+        }
+    });
+}
+            @Override
             public boolean onShowFileChooser(
                     WebView view,
                     ValueCallback<Uri[]> callback,
@@ -310,4 +350,71 @@ public class MainActivity extends Activity {
             super.onBackPressed();
         }
     }
+    private void requestMediaPermissions(boolean needCamera, boolean needAudio) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        java.util.ArrayList<String> permissions = new java.util.ArrayList<>();
+
+        if (needCamera &&
+                checkSelfPermission(Manifest.permission.CAMERA)
+                        != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.CAMERA);
+        }
+
+        if (needAudio &&
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                        != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.RECORD_AUDIO);
+        }
+
+        if (!permissions.isEmpty()) {
+            requestPermissions(
+                    permissions.toArray(new String[0]),
+                    MEDIA_PERMISSION_REQUEST
+            );
+        }
+    }
+}
+    @Override
+public void onRequestPermissionsResult(
+        int requestCode,
+        String[] permissions,
+        int[] grantResults) {
+
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+    if (requestCode == MEDIA_PERMISSION_REQUEST
+            && pendingPermissionRequest != null) {
+
+        boolean cameraAllowed =
+                checkSelfPermission(Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED;
+
+        boolean microphoneAllowed =
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED;
+
+        String[] resources = pendingPermissionRequest.getResources();
+        boolean allowed = true;
+
+        for (String resource : resources) {
+            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)
+                    && !cameraAllowed) {
+                allowed = false;
+            }
+
+            if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)
+                    && !microphoneAllowed) {
+                allowed = false;
+            }
+        }
+
+        if (allowed) {
+            pendingPermissionRequest.grant(resources);
+        } else {
+            pendingPermissionRequest.deny();
+        }
+
+        pendingPermissionRequest = null;
+    }
+}
 }
