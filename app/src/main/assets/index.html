@@ -6300,7 +6300,33 @@ window.addEventListener('resize', function(){
 });
 
 /* ================= CLASS CHAT (public) ================= */
-var publicChatPollHandle = null;
+var publicChatPollHandle = null; var publicChatRealtimeChannel = null;
+
+function startPublicChatRealtime(){
+  if(publicChatRealtimeChannel || !sb) return;
+
+  publicChatRealtimeChannel = sb
+    .channel('edalen-public-chat')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'public_messages'
+      },
+      function(){
+        loadPublicMessages(true);
+      }
+    )
+    .subscribe();
+}
+
+function stopPublicChatRealtime(){
+  if(publicChatRealtimeChannel && sb){
+    sb.removeChannel(publicChatRealtimeChannel);
+    publicChatRealtimeChannel = null;
+  }
+}
 function publicChatCacheKey(){ return 'edalen_public_chat_cache_v2'; }
 function privateChatCacheKey(recipientId){
   var me = AppState.user && AppState.user.id ? AppState.user.id : 'me';
