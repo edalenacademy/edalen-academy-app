@@ -39,6 +39,11 @@
   --sans:'Work Sans', -apple-system, Segoe UI, sans-serif;
   --mono:'IBM Plex Mono', monospace;
   --shadow-card: 0 1px 2px rgba(20,33,61,.06), 0 6px 20px -12px rgba(20,33,61,.18);
+  /* App shell: keeps the fixed top bar (menu, announcements, messages, AI tutor, profile)
+     aligned with the sidebar's current width, and lets other fixed/sticky elements (the
+     exam header, the question palette) offset themselves below it consistently. */
+  --sb-w:238px;
+  --topbar-h:72px;
 }
 /* ============ USER THEMES ============ */
 body.theme-dark{
@@ -253,6 +258,12 @@ footer{border-top:1px solid var(--border); padding:36px 0; margin-top:20px;}
 .side-link .ic{width:18px; height:18px; flex-shrink:0; display:flex; align-items:center; justify-content:center;}
 .side-foot{padding:16px 20px; border-top:1px solid rgba(255,255,255,.1); font-size:12.5px; color:#8B93AC;}
 .side-collapse-btn{display:none;}
+.reload-fab{position:fixed;right:16px;bottom:110px;z-index:65;width:46px;height:46px;border-radius:50%;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;box-shadow:0 10px 24px rgba(0,0,0,.3);padding:0;}
+.reload-fab:hover{background:var(--ink-soft, var(--ink));}
+.reload-fab svg{width:20px;height:20px;}
+.reload-fab.spinning svg{animation:reloadFabSpin .5s linear infinite;}
+@keyframes reloadFabSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+@media(max-width:620px){.reload-fab{right:14px;bottom:96px;width:42px;height:42px;}.reload-fab svg{width:18px;height:18px;}}
 .tutor-fab-wrap{position:fixed; right:20px; bottom:20px; z-index:70; display:flex; flex-direction:column; align-items:flex-end; gap:12px;}
 .tutor-fab{width:52px; height:52px; border-radius:50%; background:var(--ink); color:#fff; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 10px 24px rgba(0,0,0,.3);}
 .tutor-fab-label{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; font-weight:800; font-size:13px; letter-spacing:0.5px; color:var(--amber);}
@@ -264,14 +275,22 @@ footer{border-top:1px solid var(--border); padding:36px 0; margin-top:20px;}
 .tutor-fab-messages{flex:1; overflow-y:auto; padding:12px;}
 .tutor-fab-form{display:flex; gap:6px; padding:10px; border-top:1px solid var(--border);}
 .tutor-fab-form input{flex:1; font-size:13.5px;}
+.tutor-msgs-wrap{position:relative; flex:1; min-height:0; display:flex; flex-direction:column;}
+.tutor-scroll-down{position:absolute; right:14px; bottom:12px; width:34px; height:34px; border-radius:50%; background:var(--ink); color:#fff; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.25); opacity:0; visibility:hidden; transform:translateY(6px); transition:opacity .15s ease, transform .15s ease, visibility .15s; z-index:5;}
+.tutor-scroll-down.show{opacity:1; visibility:visible; transform:translateY(0);}
+.tutor-scroll-down svg{width:16px; height:16px;}
 @media(max-width:880px){
+  :root{--sb-w:0px;}
   .sidebar{position:fixed; left:-260px; z-index:60; transition:left .2s ease; box-shadow:20px 0 40px rgba(0,0,0,.3);}
   .sidebar.open{left:0;}
   .side-collapse-btn{display:flex; position:fixed; bottom:20px; left:20px; z-index:61; background:var(--ink); color:#fff; width:48px; height:48px; border-radius:50%; align-items:center; justify-content:center; box-shadow:0 10px 24px rgba(0,0,0,.3); border:none;}
 }
+/* The sidebar is briefly 220px wide (not yet off-canvas) in this narrow slice between the
+   two breakpoints above/below; keep the top bar's left offset matching it exactly here. */
+@media(min-width:881px) and (max-width:900px){ :root{--sb-w:220px;} }
 
 .main{flex:1; min-width:0;}
-.topbar{display:flex; align-items:center; justify-content:space-between; padding:18px 30px; border-bottom:1px solid var(--border); background:var(--paper-raised); position:sticky; top:0; z-index:20;}
+.topbar{display:flex; align-items:center; justify-content:space-between; padding:18px 30px; border-bottom:1px solid var(--border); background:var(--paper-raised); position:fixed; top:0; left:var(--sb-w); right:0; z-index:25;}
 .topbar h1{font-size:21px;}
 .topbar-left{display:flex; align-items:center; gap:12px; min-width:0;}
 .topbar-user{display:flex; align-items:center; gap:12px; cursor:pointer; padding:4px 10px 4px 4px; border-radius:999px; transition:background .12s ease;}
@@ -282,7 +301,7 @@ footer{border-top:1px solid var(--border); padding:36px 0; margin-top:20px;}
 .status-dot{width:8px; height:8px; border-radius:50%; background:var(--forest); box-shadow:0 0 0 3px var(--forest-wash);}
 .uname-sub{font-size:11.5px; color:var(--text-soft);}
 
-.content{padding:30px; padding-bottom:110px; max-width:1080px;}
+.content{padding:30px; padding-bottom:110px; max-width:1080px; padding-top:calc(var(--topbar-h) + 30px);}
 .card{background:var(--paper-raised); border:1px solid var(--border); border-radius:var(--radius); padding:24px; min-width:0;}
 .grid-2{display:grid; grid-template-columns:2fr 1fr; gap:18px;}
 .grid-2 > *{min-width:0;}
@@ -428,7 +447,7 @@ table.simple tr:last-child td{border-bottom:none;}
 .practice-checklist li{display:flex;gap:10px;align-items:flex-start;color:var(--text-soft);font-size:13.5px;line-height:1.55;}
 .practice-check{width:22px;height:22px;border-radius:50%;background:var(--forest-wash);color:var(--forest);display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex:0 0 22px;font-size:12px;}
 .exam-shell{align-items:start;}
-.exam-header{position:sticky;top:0;z-index:8;background:var(--paper);padding:4px 0 12px;}
+.exam-header{position:sticky;top:var(--topbar-h);z-index:8;background:var(--paper);padding:4px 0 12px;}
 .exam-header-main{display:flex;align-items:center;gap:12px;min-width:0;}
 .exam-progress{height:5px;border-radius:999px;background:var(--border);overflow:hidden;margin-top:9px;max-width:460px;}
 .exam-progress > span{display:block;height:100%;background:var(--forest);border-radius:inherit;transition:width .18s ease;}
@@ -442,7 +461,7 @@ table.simple tr:last-child td{border-bottom:none;}
 .opt.sel{box-shadow:0 0 0 2px rgba(31,111,80,.08);}
 .opt .tag{transition:all .12s ease;}
 .exam-nav-btns{border-top:1px solid var(--border);padding-top:18px;}
-.palette-box{position:sticky;top:72px;box-shadow:var(--shadow-card);}
+.palette-box{position:sticky;top:var(--topbar-h);box-shadow:var(--shadow-card);}
 .palette-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .palette-sub{font-size:11.5px;color:var(--text-soft);margin-top:3px;}
 .pnum{cursor:pointer;transition:transform .1s ease,box-shadow .1s ease;}
@@ -645,6 +664,9 @@ body.chat-route .main{
   overflow:hidden !important;
 }
 body.chat-route .topbar{
+  position:relative !important;
+  left:auto !important;
+  right:auto !important;
   flex:0 0 auto !important;
 }
 body.chat-route .content{
@@ -1096,6 +1118,7 @@ td,th{padding:10px 12px;}
   .hero-grid{gap:32px;}
   .sidebar{width:220px;}
   .topbar{padding:12px 16px;}
+  :root{--topbar-h:64px;}
 }
 @media(max-width:640px){
   .wrap{padding-left:16px; padding-right:16px;}
@@ -1467,7 +1490,7 @@ body.chat-route .chat-top-actions .top-msg-btn{width:38px; height:38px; flex-bas
 .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}.setting-line{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 0;border-top:1px solid var(--border);}.setting-line span{display:flex;flex-direction:column;gap:4px}.setting-line small{color:var(--text-soft);line-height:1.45}.setting-line input[type=checkbox]{width:20px;height:20px;accent-color:var(--forest);flex:0 0 auto;}
 .exam-help-line{font-size:12px;color:var(--text-soft);margin:12px 0 4px;padding-top:10px;border-top:1px solid var(--border);}
 body.compact-exam .qcard{padding:18px} body.compact-exam .opt{padding:11px 12px} body.compact-exam .exam-shell{gap:14px}
-@media(max-width:760px){.settings-grid{grid-template-columns:1fr}.progress-row{grid-template-columns:1fr 1.4fr 46px}.announcement-date{width:100%;margin-left:17px}.db-wrap{padding-bottom:24px}.exam-header{position:sticky;top:0;z-index:30}.exam-shell{grid-template-columns:1fr!important}.palette-box{order:2}.qcard{min-height:unset!important}.qtext{font-size:17px!important;line-height:1.55}.opt{min-height:48px}.exam-nav-btns{position:sticky;bottom:0;background:var(--paper);padding-top:10px}.exam-help-line{font-size:11px}.topbar-user .uname-sub{display:none}}
+@media(max-width:760px){.settings-grid{grid-template-columns:1fr}.progress-row{grid-template-columns:1fr 1.4fr 46px}.announcement-date{width:100%;margin-left:17px}.db-wrap{padding-bottom:24px}.exam-header{position:sticky;top:var(--topbar-h);z-index:30}.exam-shell{grid-template-columns:1fr!important}.palette-box{order:2}.qcard{min-height:unset!important}.qtext{font-size:17px!important;line-height:1.55}.opt{min-height:48px}.exam-nav-btns{position:sticky;bottom:0;background:var(--paper);padding-top:10px}.exam-help-line{font-size:11px}.topbar-user .uname-sub{display:none}}
 
 /* ====== EDALEN ACADEMY STUDY TOOLKIT ADDITIONS ====== */
 .study-toolkit{grid-column:1/-1;}
@@ -2211,9 +2234,21 @@ async function b2DeleteQuestionFile(path){
       headers:headers,
       body:JSON.stringify({path:path})
     });
-    if(!r.ok){ console.warn('B2 delete: backend function returned an error for', path); }
+    if(!r.ok){
+      var errData = await r.json().catch(function(){ return {}; });
+      console.warn('B2 delete: backend function returned an error for', path, errData);
+      /* Metadata is deleted regardless (see caller), so the JSON file itself is now
+         orphaned in Backblaze storage. Tell an admin so it doesn't go unnoticed \u2014
+         a silent failure here just quietly accumulates storage forever. */
+      if(getUser().isAdmin){
+        toast('Question file removed from the list, but the stored file could not be deleted (' + (errData.error || ('HTTP ' + r.status)) + '). It may still be using storage.');
+      }
+    }
   }catch(err){
     console.warn('B2 delete: could not reach storage backend for', path, err);
+    if(getUser().isAdmin){
+      toast('Question file removed from the list, but the storage backend could not be reached to delete the underlying file.');
+    }
   }
 }
 
@@ -2438,6 +2473,19 @@ window.addEventListener('error', function(ev){
   }catch(_){}
 });
 
+/* "Low-network assistance" setting: give clearer retry guidance around
+   connectivity drops when the user has opted in from Settings. */
+window.addEventListener('offline', function(){
+  if(studyPrefs().lowNetwork){
+    toast('You\u2019re offline. Answers you\u2019ve already picked stay saved on this device \u2014 reconnect, then retry the last action.');
+  }
+});
+window.addEventListener('online', function(){
+  if(studyPrefs().lowNetwork){
+    toast('Back online. You can retry now.');
+  }
+});
+
 
 function syncChatViewport(){
   if(!document.body.classList.contains('chat-route')) return;
@@ -2565,6 +2613,7 @@ function render(skipCountsRefresh){
   var __studyPrefs=studyPrefs();
   applyAppTheme(__studyPrefs.theme||'light');
   document.body.classList.toggle('study-focus-mode',!!__studyPrefs.focus);
+  document.body.classList.toggle('compact-exam',!!__studyPrefs.compact);
   document.body.classList.remove('chat-route');
 
   /* Leaving the chat (or switching chat type) must release the microphone. */
@@ -3174,6 +3223,15 @@ function renderExamResumeDock(route){
     '</div>';
 }
 
+/* Floating reload button (Settings-adjacent quick action): kept off the exam
+   page on purpose, same as the AI tutor FAB, so a stray tap can never disrupt
+   a timed test or sit over the question palette. */
+function reloadFabHtml(route){
+  if(route === '#/practice/exam') return '';
+  return '<button type="button" class="reload-fab" data-action="fast-reload" title="Reload app" aria-label="Reload app">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>' +
+  '</button>';
+}
 function renderShell(bodyHtml, route, title){
   var user = getUser();
   var activeKey = route.replace('#/','').split('/')[0];
@@ -3192,7 +3250,10 @@ function renderShell(bodyHtml, route, title){
     '<div class="tutor-fab-wrap">' +
         '<div class="tutor-fab-panel">' +
           '<div class="tutor-fab-header">Ask the AI tutor<button type="button" data-action="toggle-tutor-widget">\u2715</button></div>' +
-          '<div id="floatingTutorMessages" class="tutor-fab-messages">'+renderTutorMessagesHtml()+'</div>' +
+          '<div class="tutor-msgs-wrap">' +
+            '<div id="floatingTutorMessages" class="tutor-fab-messages">'+renderTutorMessagesHtml()+'</div>' +
+            '<button type="button" class="tutor-scroll-down" data-action="scroll-tutor-down" data-target="floatingTutorMessages" title="Jump to latest" aria-label="Jump to latest message"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg></button>' +
+          '</div>' +
           '<form data-action="ask-tutor" class="tutor-fab-form">' +
             '<input type="text" id="floatingTutorInput" placeholder="Ask a study question\u2026" autocomplete="off" required>' +
             '<button class="btn btn-primary btn-sm" type="submit">Ask</button>' +
@@ -3253,7 +3314,7 @@ function renderShell(bodyHtml, route, title){
       '<div class="content '+((route==='#/chat'||route.indexOf('#/messages/')===0)?'chat-page':'')+'">'+bodyHtml+'</div>' +
     '</div>' +
   '</div>' +
-  floatingTutorHtml + renderExamResumeDock(route);
+  floatingTutorHtml + renderExamResumeDock(route) + reloadFabHtml(route);
 }
 
 /* ================= DASHBOARD ================= */
@@ -3297,7 +3358,8 @@ function viewAnnouncements(){
 }
 function announcementTopButton(){
   var n=AppState.announcementsUnread||0;
-  return '<button type="button" class="chat-top-action announcement-top-btn" data-nav="#/announcements" title="Announcements" aria-label="Announcements">!'+(n?'<span class="notice-badge">'+(n>9?'9+':n)+'</span>':'')+'</button>';
+  var showBadge = n && studyPrefs().announcements!==false;
+  return '<button type="button" class="chat-top-action announcement-top-btn" data-nav="#/announcements" title="Announcements" aria-label="Announcements">!'+(showBadge?'<span class="notice-badge">'+(n>9?'9+':n)+'</span>':'')+'</button>';
 }
 function viewProgress(){
   var attempts=getAttempts(); var by={};
@@ -3370,6 +3432,25 @@ function toggleStudyBookmark(q, subject){
   else{rows.unshift({key:key,subject:subject||q.subject||'General',question:q.question||'',options:q.options||[],correctIndex:q.correctIndex,explanation:q.explanation||'',source:q.source||'',addedAt:nowISO()});saveStudyBookmarks(rows);toast('Question saved to bookmarks.');}
 }
 function getRevisionReminders(){try{return JSON.parse(localStorage.getItem('edalen_reminders_'+studyUserKey())||'[]');}catch(e){return [];}}
+/* "Show exam reminders" setting: surface due/overdue revision reminders while
+   an exam or practice session is active, instead of only on the dedicated
+   Revision reminders page. Toasted once per exam so the interval-driven exam
+   timer (which does not call render()) can't spam it. */
+var __examReminderShownFor = {};
+function dueRevisionReminders(){
+  var today = nowISO().slice(0,10);
+  return getRevisionReminders().filter(function(r){ return r && r.date && r.date<=today; });
+}
+function maybeShowExamReminderToast(exam){
+  if(!exam || !exam.id) return;
+  if(studyPrefs().reminders===false) return;
+  if(__examReminderShownFor[exam.id]) return;
+  var due = dueRevisionReminders();
+  if(!due.length) return;
+  __examReminderShownFor[exam.id]=true;
+  var first = due[0];
+  toast((due.length>1?due.length+' revision reminders are due, including "':'Revision reminder due: "')+first.title+'"'+(due.length>1?'.':(first.subject?' ('+first.subject+').':'.')));
+}
 function saveRevisionReminders(rows){try{localStorage.setItem('edalen_reminders_'+studyUserKey(),JSON.stringify(rows||[]));}catch(e){}}
 function viewBookmarks(){
   var rows=getStudyBookmarks();
@@ -3378,10 +3459,10 @@ function viewBookmarks(){
 }
 function viewQuestionExplorer(){
   var banks=getBanks()||{}, all=[];
-  Object.keys(banks).forEach(function(subject){(banks[subject]||[]).forEach(function(q){all.push(Object.assign({},q,{subject:subject}));});});
+  Object.keys(banks).forEach(function(subject){(banks[subject]||[]).forEach(function(q, qi){all.push(Object.assign({},q,{subject:subject,__bankIndex:qi}));});});
   var subjects=Object.keys(banks).sort();
   var opts=subjects.map(function(s){return '<option value="'+esc(s)+'">'+esc(s)+'</option>';}).join('');
-  var cards=all.slice(0,80).map(function(q){return '<article class="study-question" data-study-question data-subject="'+esc(q.subject)+'" data-topic="'+esc(q.topic||q.category||'General')+'" data-search="'+esc((q.question||'')+' '+(q.subject||'')+' '+(q.topic||q.category||''))+'"><div class="study-q-meta">'+esc(q.subject)+' · '+esc(q.topic||q.category||'General')+'</div><div class="study-q-text">'+esc(q.question||'')+'</div><div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" data-action="bookmark-bank-question" data-subject="'+esc(q.subject)+'" data-index="'+esc(String(all.indexOf(q)))+'">'+(isStudyBookmarked(q)?'Saved':'Save question')+'</button></div></article>';}).join('');
+  var cards=all.slice(0,80).map(function(q){return '<article class="study-question" data-study-question data-subject="'+esc(q.subject)+'" data-topic="'+esc(q.topic||q.category||'General')+'" data-search="'+esc((q.question||'')+' '+(q.subject||'')+' '+(q.topic||q.category||''))+'"><div class="study-q-meta">'+esc(q.subject)+' · '+esc(q.topic||q.category||'General')+'</div><div class="study-q-text">'+esc(q.question||'')+'</div><div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" data-action="bookmark-bank-question" data-subject="'+esc(q.subject)+'" data-index="'+esc(String(q.__bankIndex))+'">'+(isStudyBookmarked(q)?'Saved':'Save question')+'</button></div></article>';}).join('');
   return '<div class="page-intro"><div><span class="section-tag">Study library</span><h2 style="margin:5px 0 4px;">Search questions</h2><p style="color:var(--text-soft);margin:0;">Search loaded questions by keyword, subject, or topic. More filters become available as your bank includes topic labels.</p></div></div><div class="card" style="margin-top:16px;"><div class="study-filter-row"><input id="studySearch" placeholder="Search question or keyword"/><select id="studySubject"><option value="">All subjects</option>'+opts+'</select><input id="studyTopic" placeholder="Topic (e.g. algebra)"/></div><div id="studyQuestionResults">'+(cards||'<div class="study-empty">No questions are loaded in the local bank yet.</div>')+'</div></div>';
 }
 function viewRevisionReminders(){
@@ -4134,6 +4215,7 @@ function viewExam(){
   if(!exam || !Array.isArray(exam.questions) || !exam.questions.length){
     return '<div class="empty"><div class="ico">?</div><b>No exam in progress</b><p style="margin-top:6px;">Set up a practice exam to begin.</p><a class="btn btn-primary btn-sm" data-nav="#/practice/setup" style="margin-top:14px;">Set up exam</a></div>';
   }
+  maybeShowExamReminderToast(exam);
   var qi = Math.max(0, Math.min(exam.current||0, exam.questions.length-1));
   exam.current = qi;
   var q = exam.questions[qi] || {question:'Question unavailable',options:['','','',''],correctIndex:0,chosen:null,flagged:false};
@@ -6946,6 +7028,7 @@ async function loadTutorHistory(){
   AppState.tutorHistory = (res.data||[]).map(function(m){ return {role:m.role, text:m.content}; });
   AppState.tutorHistoryLoading = false;
   render();
+  scrollTutorToBottom();
 }
 
 function renderTutorMessagesHtml(){
@@ -6974,6 +7057,22 @@ function scrollTutorToBottom(){
   });
 }
 
+/* Shows/hides the "jump to latest" arrow on the AI tutor message lists based on
+   scroll position. Uses a capturing document listener (scroll doesn't bubble)
+   so it keeps working across re-renders without needing to be re-attached. */
+function updateTutorScrollDownBtn(msgsEl){
+  if(!msgsEl || !msgsEl.parentElement) return;
+  var btn = msgsEl.parentElement.querySelector('.tutor-scroll-down');
+  if(!btn) return;
+  var distanceFromBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight;
+  btn.classList.toggle('show', distanceFromBottom > 40);
+}
+document.addEventListener('scroll', function(e){
+  var el = e.target;
+  if(!el || (el.id !== 'tutorMessages' && el.id !== 'floatingTutorMessages')) return;
+  updateTutorScrollDownBtn(el);
+}, true);
+
 async function sendTutorMessage(question){
   AppState.tutorHistory = (AppState.tutorHistory||[]).concat([{role:'user', text:question}]);
   sb.from('tutor_messages').insert({user_id:AppState.user.id, role:'user', content:question});
@@ -6981,12 +7080,22 @@ async function sendTutorMessage(question){
   render();
   scrollTutorToBottom();
 
+  /* Send the recent back-and-forth along with the new question so the tutor
+     can follow up on what was already discussed (e.g. "explain that step again",
+     "what about part b?") instead of answering each question in isolation.
+     Excludes the question we just pushed onto tutorHistory above, and caps
+     the window so the payload doesn't grow unbounded over a long session. */
+  var conversationHistory = AppState.tutorHistory
+    .slice(0, -1)
+    .slice(-20)
+    .map(function(m){ return { role: m.role, content: m.text }; });
+
   var answerText;
   try{
     var tutorRes = await fetch(SUPABASE_URL + '/functions/v1/dynamic-worker', {
       method:'POST',
       headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+AppState.session.access_token },
-      body: JSON.stringify({ question: question, academy_context: { exam_target: AppState.user && AppState.user.examTarget, subjects: SUBJECTS.map(function(x){return x.name;}), recent_attempts: (getAttempts()||[]).slice(0,8).map(function(a){return {subject:a.subject,score:a.score,total:a.total,date:a.date};}), instruction: 'You are the EDALEN ACADEMY study tutor. Give clear, exam-focused explanations. Prefer step-by-step reasoning for mathematics/science questions, and identify the likely JAMB/WAEC/NECO context when relevant.' } })
+      body: JSON.stringify({ question: question, conversation_history: conversationHistory, academy_context: { exam_target: AppState.user && AppState.user.examTarget, subjects: SUBJECTS.map(function(x){return x.name;}), recent_attempts: (getAttempts()||[]).slice(0,8).map(function(a){return {subject:a.subject,score:a.score,total:a.total,date:a.date};}), instruction: 'You are the EDALEN ACADEMY study tutor. Give clear, exam-focused explanations. Prefer step-by-step reasoning for mathematics/science questions, and identify the likely JAMB/WAEC/NECO context when relevant. Read conversation_history first and treat this as a continuing conversation: resolve pronouns and follow-ups ("that", "the second one", "explain further") against it, and stay consistent with anything you already told the student.' } })
     });
     var tutorData = await tutorRes.json().catch(function(){ return {}; });
 
@@ -7014,7 +7123,10 @@ function viewTutor(){
   '<div class="card" style="display:flex; flex-direction:column; height:60vh;">' +
     (AppState.tutorReturnToChat ?
       '<button type="button" class="btn btn-secondary btn-sm" data-action="back-to-chat" style="margin-bottom:12px; align-self:flex-start;">← Back to Class chat</button>' : '') +
-    '<div id="tutorMessages" style="flex:1; overflow-y:auto; margin-bottom:12px;">'+renderTutorMessagesHtml()+'</div>' +
+    '<div class="tutor-msgs-wrap" style="margin-bottom:12px;">' +
+      '<div id="tutorMessages" style="flex:1; overflow-y:auto;">'+renderTutorMessagesHtml()+'</div>' +
+      '<button type="button" class="tutor-scroll-down" data-action="scroll-tutor-down" data-target="tutorMessages" title="Jump to latest" aria-label="Jump to latest message"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg></button>' +
+    '</div>' +
     '<form data-action="ask-tutor" style="display:flex; gap:8px;">' +
       '<input type="text" id="tutorInput" placeholder="Ask a study question\u2026" style="flex:1;" autocomplete="off" required>' +
       '<button class="btn btn-primary" type="submit">Ask</button>' +
@@ -7484,6 +7596,13 @@ document.addEventListener('click', async function(e){
       render();
       if(AppState.tutorWidgetOpen){ scrollTutorToBottom(); }
       break;
+    case 'scroll-tutor-down': {
+      var stdId = actionEl.getAttribute('data-target') || 'tutorMessages';
+      var stdEl = document.getElementById(stdId);
+      if(stdEl){ stdEl.scrollTop = stdEl.scrollHeight; }
+      actionEl.classList.remove('show');
+      break;
+    }
     case 'open-tutorial': {
       var otId = actionEl.getAttribute('data-id');
       toast('Opening\u2026');
@@ -7960,6 +8079,20 @@ document.addEventListener('click', async function(e){
       var a=document.createElement('a'); a.href=dr.fileData; a.download=(dr.fileName||dr.name||'edalen-resource').replace(/[^a-z0-9._ -]/gi,'_'); document.body.appendChild(a); a.click(); a.remove();
       break;
     }
+    /* This is a plain type="button" outside any <form>, so it only ever
+       fires a click event, never a submit — it must be handled here. */
+    case 'fast-reload': {
+      if(getCurrentExam() && currentRoute()==='#/practice/exam'){
+        /* Extra guard: even though this button is hidden on the exam page itself,
+           never let a reload happen while a timed exam is genuinely in progress. */
+        toast('Finish or pause the exam before reloading.');
+        break;
+      }
+      actionEl.classList.add('spinning');
+      actionEl.disabled = true;
+      location.reload();
+      break;
+    }
     case 'delete-resource': {
       var did = actionEl.getAttribute('data-id');
       var delRes = await sb.from('resources').delete().eq('id', did);
@@ -8252,7 +8385,9 @@ document.addEventListener('submit', async function(e){
     var bkey=actionEl.getAttribute('data-key'); var br=getStudyBookmarks().filter(function(b){return b.key!==bkey;}); saveStudyBookmarks(br); toast('Bookmark removed.'); render(true);
   }
   else if(action === 'bookmark-bank-question'){
-    var bs=actionEl.getAttribute('data-subject')||''; var bi=parseInt(actionEl.getAttribute('data-index'),10); var bb=(getBanks()[bs]||[])[bi]; if(bb){toggleStudyBookmark(bb,bs);render(true);} 
+    var bs=actionEl.getAttribute('data-subject')||''; var bi=parseInt(actionEl.getAttribute('data-index'),10); var bb=(getBanks()[bs]||[])[bi];
+    if(bb){toggleStudyBookmark(bb,bs);render(true);}
+    else{toast('Could not save this question \u2014 please refresh and try again.');}
   }
   else if(action === 'save-reminder'){
     var rt=($('#reminderTitle')&&$('#reminderTitle').value||'').trim(), rs=($('#reminderSubject')&&$('#reminderSubject').value||'').trim(), rd=($('#reminderDate')&&$('#reminderDate').value||'').trim();
@@ -8263,7 +8398,16 @@ document.addEventListener('submit', async function(e){
     var rid=actionEl.getAttribute('data-id'); saveRevisionReminders(getRevisionReminders().filter(function(r){return r.id!==rid;})); toast('Reminder deleted.'); render(true);
   }
   else if(action === 'study-focus-now'){
-    document.body.classList.toggle('study-focus-mode'); toast(document.body.classList.contains('study-focus-mode')?'Focus mode enabled.':'Focus mode disabled.');
+    /* Was only toggling the DOM class directly, so the very next render()
+       (any navigation, any incoming chat/announcement update) reapplied the
+       *saved* focus preference and silently undid this. Persist it like the
+       Settings checkbox does, so it actually sticks until turned off. */
+    var u=getUser()||{}; var pkey='edalen_prefs_'+(u.id||'guest'); var curPrefs={};
+    try{ curPrefs=JSON.parse(localStorage.getItem(pkey)||'{}')||{}; }catch(e){}
+    curPrefs.focus = !curPrefs.focus;
+    try{ localStorage.setItem(pkey, JSON.stringify(curPrefs)); }catch(e){}
+    document.body.classList.toggle('study-focus-mode', !!curPrefs.focus);
+    toast(curPrefs.focus?'Focus mode enabled.':'Focus mode disabled.');
   }
   else if(action === 'study-network-check'){
     toast(navigator.onLine?'You appear to be online.':'You appear to be offline. Please reconnect before loading a new question file.');
