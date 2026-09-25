@@ -103,8 +103,8 @@ private static final int MEDIA_PERMISSION_REQUEST = 2001;
         WebSettings settings = webView.getSettings();
 
         settings.setJavaScriptEnabled(true);
-        settings.setSupportMultipleWindows(false);
-settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setSupportMultipleWindows(true);
+settings.setJavaScriptCanOpenWindowsAutomatically(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setAllowFileAccess(true);
