@@ -123,6 +123,19 @@ settings.setJavaScriptCanOpenWindowsAutomatically(false);
         webView.setBackgroundColor(Color.WHITE);
 
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+    Uri uri = request.getUrl();
+
+    if (uri != null
+            && "meet.jit.si".equalsIgnoreCase(uri.getHost())) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+        startActivity(intent);
+        return true;
+    }
+
+    return false;
+}
 
             @Override
             public void onPageStarted(
