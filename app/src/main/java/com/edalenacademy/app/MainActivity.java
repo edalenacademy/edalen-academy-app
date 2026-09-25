@@ -130,7 +130,14 @@ public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request
     if (uri != null
             && "meet.jit.si".equalsIgnoreCase(uri.getHost())) {
         Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-        startActivity(intent);
+intent.setPackage("org.jitsi.meet");
+
+try {
+    startActivity(intent);
+} catch (Exception e) {
+    intent.setPackage(null);
+    startActivity(intent);
+}
         return true;
     }
 
