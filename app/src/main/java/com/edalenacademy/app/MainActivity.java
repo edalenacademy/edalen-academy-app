@@ -16,6 +16,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.CookieManager;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.FrameLayout;
