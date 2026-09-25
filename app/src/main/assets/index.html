@@ -6871,7 +6871,7 @@ async function loadPrivateMessages(recipientId, silent){
         if(isChatComposerFocused() && refreshChatMessagesInPlace('privateChatMessages')){
           /* Preserve the focused private-chat input while messages refresh. */
         }else{
-          render();
+          refreshChatMessagesInPlace('privateChatMessages');
           requestAnimationFrame(function(){ restoreChatScroll('privateChatMessages', privateScrollState); });
         }
       }
