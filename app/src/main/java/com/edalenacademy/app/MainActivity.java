@@ -167,7 +167,7 @@ public class MainActivity extends Activity {
          * The guard prevents repeated refresh requests while the page
          * is already loading, which can cause a blank or unstable screen.
          */
-        swipeRefreshLayout.setEnabled(true);
+        swipeRefreshLayout.setEnabled(false);
 
         swipeRefreshLayout.setOnRefreshListener(() -> {
             refreshPageSafely();
@@ -246,7 +246,8 @@ public class MainActivity extends Activity {
         );
 
         root.addView(refreshButton, refreshParams);
-
+        
+        refreshButton.setVisibility(View.GONE);
         webView.loadUrl(APP_URL);
     }
 
