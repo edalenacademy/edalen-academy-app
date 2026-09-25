@@ -6385,13 +6385,13 @@ async function loadPublicMessages(silent){
     AppState.publicReactions = reactions;
     cachePublicChat(msgs, reactions);
     if(currentRoute() === '#/chat'){
-      if(!publicChatPollHandle){ publicChatPollHandle = setInterval(function(){ loadPublicMessages(true); }, 8000); }
+      if(!publicChatPollHandle){ publicChatPollHandle = setInterval(function(){ loadPublicMessages(true); }, 20000); }
       if(!silent || changed){
         var scrollState = chatScrollState('publicChatMessages');
         if(isChatComposerFocused() && refreshChatMessagesInPlace('publicChatMessages')){
           /* Never replace the focused input while Android is opening/using the keyboard. */
         }else{
-          render();
+          refreshChatMessagesInPlace('publicChatMessages');
           requestAnimationFrame(function(){ restoreChatScroll('publicChatMessages', scrollState); });
         }
       }
@@ -6436,7 +6436,7 @@ async function loadPublicChatControls(silent){
       var votesRes = await sb.from('public_poll_votes').select('*').in('poll_id',pollIds);
       if(!votesRes.error) AppState.publicPollVotes = votesRes.data || [];
     }else AppState.publicPollVotes = [];
-    if(currentRoute()==='#/chat' && !silent && !isChatComposerFocused()) render();
+    if(currentRoute()==='#/chat' && !silent && !isChatComposerFocused()) refreshChatMessagesInPlace('publicChatMessages');
   }catch(err){
     if(!silent && err && err.message) console.warn('Chat controls unavailable:', err.message);
   }finally{ AppState.publicPollsLoading = false; }
@@ -6477,6 +6477,7 @@ function showCreatePollModal(){
     var n=box.querySelectorAll('.poll-option-input').length+1, inp=document.createElement('input');
     inp.className='poll-option-input'; inp.placeholder='Option '+n; inp.style.cssText='width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;margin-bottom:8px;background:var(--paper);color:var(--ink);'; box.appendChild(inp);
   };
+  overlay.querySelector('#pollCancel').onclick=function(){overlay.remove();};
   overlay.querySelector('#pollCreate').onclick=async function(){
     var q=overlay.querySelector('#pollQuestionInput').value.trim();
     var opts=Array.from(box.querySelectorAll('.poll-option-input')).map(function(x){return x.value.trim();}).filter(Boolean);
@@ -6864,7 +6865,7 @@ async function loadPrivateMessages(recipientId, silent){
     cachePrivateChat(recipientId, msgs, reactions);
     if(msgCenterActivePartner() === recipientId){ msgCenterMarkRead(recipientId); msgCenterUpdateBadge(); }
     if(currentRoute() === '#/messages/'+recipientId){
-      if(!privateChatPollHandle){ privateChatPollHandle = setInterval(function(){ loadPrivateMessages(recipientId, true); }, 8000); }
+      if(!privateChatPollHandle){ privateChatPollHandle = setInterval(function(){ loadPrivateMessages(recipientId, true); }, 20000); }
       if(!silent || changed){
         var privateScrollState = chatScrollState('privateChatMessages');
         if(isChatComposerFocused() && refreshChatMessagesInPlace('privateChatMessages')){
