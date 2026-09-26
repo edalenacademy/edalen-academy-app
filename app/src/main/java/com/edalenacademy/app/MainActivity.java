@@ -1,5 +1,6 @@
 package com.edalenacademy.app;
 
+import android.content.Intent;
 import android.Manifest;
 import android.content.Context;
 import android.content.SharedPreferences;
