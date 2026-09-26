@@ -38,7 +38,6 @@ import androidx.fragment.app.FragmentActivity;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import org.json.JSONObject;
-import org.json.JSONTokener;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
@@ -481,26 +480,38 @@ public class MainActivity extends FragmentActivity {
     private void syncCurrentSupabaseSession() {
         if (webView == null) return;
 
+        /*
+         * evaluateJavascript's callback receives the SYNCHRONOUS completion
+         * value of the script. "(async function(){...})()" evaluates
+         * synchronously to a pending Promise, not the eventual resolved
+         * value, so a "return" from inside the async body never reaches the
+         * Java callback here (it always arrives as null, before the await
+         * even settles). Instead, have the script report the result back
+         * through the native bridge directly once it actually has it.
+         */
         String script =
                 "(async function(){"
                         + "try{"
-                        + "if(!window.sb||!sb.auth)return '';"
+                        + "if(!window.sb||!sb.auth)return;"
                         + "var r=await sb.auth.getSession();"
-                        + "if(!r||!r.data||!r.data.session)return '';"
+                        + "if(!r||!r.data||!r.data.session)return;"
                         + "var s=r.data.session;"
                         + "var u=(window.AppState&&AppState.user)?AppState.user:null;"
                         + "var o={access_token:s.access_token,refresh_token:s.refresh_token,user:u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null};"
-                        + "return 'OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o))));"
-                        + "}catch(e){return '';}"
+                        + "if(window.EdalenNative&&EdalenNative.reportSyncedSession){"
+                        + "EdalenNative.reportSyncedSession('OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o)))));"
+                        + "}"
+                        + "}catch(e){}"
                         + "})()";
 
-        webView.evaluateJavascript(script, value -> {
-            String encoded = extractJavascriptString(value);
-            if (encoded == null || !encoded.startsWith("OK:")) return;
+        webView.evaluateJavascript(script, null);
+    }
 
-            JSONObject session = decodeBase64Json(encoded.substring(3));
-            if (session != null) saveEncryptedSession(session);
-        });
+    private void handleSyncedSessionResult(String encoded) {
+        if (encoded == null || !encoded.startsWith("OK:")) return;
+
+        JSONObject session = decodeBase64Json(encoded.substring(3));
+        if (session != null) saveEncryptedSession(session);
     }
 
     /*
@@ -511,87 +522,66 @@ public class MainActivity extends FragmentActivity {
      * - refresh the session once if a refresh token exists;
      * - only then pass the session to Java.
      */
-   private void captureCurrentSessionForBiometric() {
-    if (webView == null) {
-        biometricBridge.sendBiometricError(
-                "The login session is not ready yet. Please wait a moment and try again."
-        );
-        return;
+    private void captureCurrentSessionForBiometric() {
+        if (webView == null) {
+            biometricBridge.sendBiometricError(
+                    "The login session is not ready yet. Please wait a moment and try again."
+            );
+            return;
+        }
+
+        /*
+         * As in syncCurrentSupabaseSession(): evaluateJavascript's callback
+         * only ever sees the synchronous completion value of the script,
+         * which for "(async function(){...})()" is a pending Promise, not
+         * the resolved result. The old code's "return 'OK:...'" / "return
+         * 'ERROR:...'" from inside the async body could never actually
+         * reach the Java callback -> the callback always fired almost
+         * immediately with a null/empty value, well before
+         * "await sb.auth.getSession()" (or the refresh/localStorage
+         * fallback) had actually finished. That produced the
+         * "could not read the current login session" error on every
+         * attempt, regardless of whether a session existed.
+         *
+         * Fix: the script reports its outcome through the native bridge
+         * itself (a real JS-to-Java call, which is not subject to this
+         * limitation) once it actually has an answer, instead of trying to
+         * hand it back via evaluateJavascript's return value.
+         */
+        String script =
+                "(async function(){"
+                        + "function pack(o){return 'OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o))));}"
+                        + "function userObj(){var u=(window.AppState&&AppState.user)?AppState.user:null;return u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null;}"
+                        + "function finish(v){try{if(window.EdalenNative&&EdalenNative.reportCapturedSession)EdalenNative.reportCapturedSession(v);}catch(e){}}"
+                        + "try{"
+                        + "var session=null;"
+                        + "if(window.sb&&sb.auth){"
+                        + "try{var r=await sb.auth.getSession();if(r&&r.data&&r.data.session)session=r.data.session;}catch(e){}"
+                        + "if(!session){"
+                        + "try{var rr=await sb.auth.refreshSession();if(rr&&rr.data&&rr.data.session)session=rr.data.session;}catch(e){}"
+                        + "}"
+                        + "}"
+                        + "if(!session){"
+                        + "try{"
+                        + "var raw=localStorage.getItem('sb-pnipgbtssereeoxchfdn-auth-token');"
+                        + "if(raw){var saved=JSON.parse(raw);if(saved&&saved.access_token)session=saved;}"
+                        + "}catch(e){}"
+                        + "}"
+                        + "if(!session||!session.access_token||!session.refresh_token){"
+                        + "finish('ERROR:'+btoa(unescape(encodeURIComponent('The current Supabase login session could not be found. Please remain on the account screen for a moment and try again.'))));"
+                        + "return;"
+                        + "}"
+                        + "finish(pack({access_token:session.access_token,refresh_token:session.refresh_token,user:userObj()}));"
+                        + "}catch(e){"
+                        + "finish('ERROR:'+btoa(unescape(encodeURIComponent(e&&e.message?e.message:'Could not read the current login session.'))));"
+                        + "}"
+                        + "})()";
+
+        webView.evaluateJavascript(script, null);
     }
 
-    String script =
-            "(async function(){"
-                    + "function pack(o){"
-                    + "return 'OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o))));"
-                    + "}"
-                    + "function error(msg){"
-                    + "return 'ERROR:'+btoa(unescape(encodeURIComponent(msg||'Could not read the current login session.')));"
-                    + "}"
-                    + "try{"
-                    + "var session=null;"
-                    + "var user=(window.AppState&&AppState.user)?AppState.user:null;"
-
-                    // 1. First try the live Supabase session.
-                    + "if(window.sb&&sb.auth){"
-                    + "try{"
-                    + "var r=await sb.auth.getSession();"
-                    + "if(r&&r.data&&r.data.session){session=r.data.session;}"
-                    + "}catch(e){}"
-                    + "}"
-
-                    // 2. If there is no live session, use the refresh token
-                    // already maintained by index.html for this user.
-                    + "if(!session&&user&&user.id){"
-                    + "try{"
-                    + "var bioKey='edalen_bio_rt_'+user.id;"
-                    + "var bioRefreshToken=localStorage.getItem(bioKey);"
-                    + "if(bioRefreshToken&&window.sb&&sb.auth){"
-                    + "var rr=await sb.auth.refreshSession({refresh_token:bioRefreshToken});"
-                    + "if(rr&&rr.data&&rr.data.session){"
-                    + "session=rr.data.session;"
-                    + "}"
-                    + "}"
-                    + "}catch(e){}"
-                    + "}"
-
-                    // 3. One final normal refresh attempt.
-                    + "if(!session&&window.sb&&sb.auth){"
-                    + "try{"
-                    + "var r2=await sb.auth.refreshSession();"
-                    + "if(r2&&r2.data&&r2.data.session){session=r2.data.session;}"
-                    + "}catch(e){}"
-                    + "}"
-
-                    // 4. Make sure both tokens exist before saving.
-                    + "if(!session||!session.access_token||!session.refresh_token){"
-                    + "return error('The current Supabase login session could not be found. Please remain on the account screen for a moment and try again.');"
-                    + "}"
-
-                    // 5. Use the current user information where available.
-                    + "var sessionUser=session.user||null;"
-                    + "var finalUser=user||sessionUser;"
-                    + "var userInfo=finalUser?{"
-                    + "id:finalUser.id||'',"
-                    + "name:finalUser.name||'',"
-                    + "username:finalUser.username||'',"
-                    + "email:finalUser.email||''"
-                    + "}:null;"
-
-                    + "return pack({"
-                    + "access_token:session.access_token,"
-                    + "refresh_token:session.refresh_token,"
-                    + "user:userInfo"
-                    + "});"
-
-                    + "}catch(e){"
-                    + "return error(e&&e.message?e.message:'Could not read the current login session.');"
-                    + "}"
-                    + "})()";
-
-    webView.evaluateJavascript(script, value -> {
+    private void handleCapturedSessionResult(String encoded) {
         try {
-            String encoded = extractJavascriptString(value);
-
             if (encoded == null || encoded.trim().isEmpty()) {
                 biometricBridge.sendBiometricError(
                         "The app could not read the current login session. Please stay on this screen and try again."
@@ -601,7 +591,6 @@ public class MainActivity extends FragmentActivity {
 
             if (encoded.startsWith("ERROR:")) {
                 String message = decodeBase64Text(encoded.substring(6));
-
                 biometricBridge.sendBiometricError(
                         message == null || message.trim().isEmpty()
                                 ? "Could not read the current login session."
@@ -618,7 +607,6 @@ public class MainActivity extends FragmentActivity {
             }
 
             JSONObject session = decodeBase64Json(encoded.substring(3));
-
             if (session == null) {
                 biometricBridge.sendBiometricError(
                         "Could not read the current login session. Please try again."
@@ -649,18 +637,6 @@ public class MainActivity extends FragmentActivity {
             biometricBridge.sendBiometricError(
                     "Could not save the biometric sign-in. Please try again."
             );
-        }
-    });
-}
-
-    private String extractJavascriptString(String value) {
-        if (value == null || "null".equals(value)) return null;
-
-        try {
-            Object parsed = new JSONTokener(value).nextValue();
-            return parsed instanceof String ? (String) parsed : null;
-        } catch (Exception e) {
-            return null;
         }
     }
 
@@ -1064,6 +1040,27 @@ public class MainActivity extends FragmentActivity {
                 clearStoredBiometricSession();
                 callJavascript("window.render&&window.render();");
             });
+        }
+
+        /*
+         * Called directly by the injected JS once
+         * captureCurrentSessionForBiometric()'s async lookup actually has an
+         * answer (either "OK:<base64 session>" or "ERROR:<base64 message>").
+         * This is a real JS-to-Java bridge call, so unlike a value returned
+         * from an async IIFE passed to evaluateJavascript, it is guaranteed
+         * to arrive only once the lookup has genuinely finished.
+         */
+        @JavascriptInterface
+        public void reportCapturedSession(String encoded) {
+            activity.runOnUiThread(() -> handleCapturedSessionResult(encoded));
+        }
+
+        /*
+         * Same idea for the periodic background session sync.
+         */
+        @JavascriptInterface
+        public void reportSyncedSession(String encoded) {
+            activity.runOnUiThread(() -> handleSyncedSessionResult(encoded));
         }
 
         private void authenticateNative() {
