@@ -511,103 +511,147 @@ public class MainActivity extends FragmentActivity {
      * - refresh the session once if a refresh token exists;
      * - only then pass the session to Java.
      */
-    private void captureCurrentSessionForBiometric() {
-        if (webView == null) {
-            biometricBridge.sendBiometricError(
-                    "The login session is not ready yet. Please wait a moment and try again."
-            );
-            return;
-        }
-
-        String script =
-                "(async function(){"
-                        + "function pack(o){return 'OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o))));}"
-                        + "function userObj(){var u=(window.AppState&&AppState.user)?AppState.user:null;return u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null;}"
-                        + "try{"
-                        + "var session=null;"
-                        + "if(window.sb&&sb.auth){"
-                        + "try{var r=await sb.auth.getSession();if(r&&r.data&&r.data.session)session=r.data.session;}catch(e){}"
-                        + "if(!session){"
-                        + "try{var rr=await sb.auth.refreshSession();if(rr&&rr.data&&rr.data.session)session=rr.data.session;}catch(e){}"
-                        + "}"
-                        + "}"
-                        + "if(!session){"
-                        + "try{"
-                        + "var raw=localStorage.getItem('sb-pnipgbtssereeoxchfdn-auth-token');"
-                        + "if(raw){var saved=JSON.parse(raw);if(saved&&saved.access_token)session=saved;}"
-                        + "}catch(e){}"
-                        + "}"
-                        + "if(!session||!session.access_token||!session.refresh_token){"
-                        + "return 'ERROR:'+btoa(unescape(encodeURIComponent('The current Supabase login session could not be found. Please remain on the account screen for a moment and try again.')));"
-                        + "}"
-                        + "return pack({access_token:session.access_token,refresh_token:session.refresh_token,user:userObj()});"
-                        + "}catch(e){"
-                        + "return 'ERROR:'+btoa(unescape(encodeURIComponent(e&&e.message?e.message:'Could not read the current login session.')));"
-                        + "}"
-                        + "})()";
-
-        webView.evaluateJavascript(script, value -> {
-            try {
-                String encoded = extractJavascriptString(value);
-
-                if (encoded == null || encoded.trim().isEmpty()) {
-                    biometricBridge.sendBiometricError(
-                            "The app could not read the current login session. Please stay on this screen and try again."
-                    );
-                    return;
-                }
-
-                if (encoded.startsWith("ERROR:")) {
-                    String message = decodeBase64Text(encoded.substring(6));
-                    biometricBridge.sendBiometricError(
-                            message == null || message.trim().isEmpty()
-                                    ? "Could not read the current login session."
-                                    : message
-                    );
-                    return;
-                }
-
-                if (!encoded.startsWith("OK:")) {
-                    biometricBridge.sendBiometricError(
-                            "Could not read the current login session. Please try again."
-                    );
-                    return;
-                }
-
-                JSONObject session = decodeBase64Json(encoded.substring(3));
-                if (session == null) {
-                    biometricBridge.sendBiometricError(
-                            "Could not read the current login session. Please try again."
-                    );
-                    return;
-                }
-
-                String accessToken = session.optString("access_token", "");
-                String refreshToken = session.optString("refresh_token", "");
-
-                if (accessToken.isEmpty() || refreshToken.isEmpty()) {
-                    biometricBridge.sendBiometricError(
-                            "Your current login session is incomplete. Please log in again."
-                    );
-                    return;
-                }
-
-                if (!saveEncryptedSession(session)) {
-                    biometricBridge.sendBiometricError(
-                            "The phone could not securely save the biometric sign-in. Please try again."
-                    );
-                    return;
-                }
-
-                biometricBridge.sendBiometricSuccess("enable");
-
-            } catch (Exception e) {
-                biometricBridge.sendBiometricError(
-                        "Could not save the biometric sign-in. Please try again."
-                );
-            }
-        });
+   private void captureCurrentSessionForBiometric() {
+    if (webView == null) {
+        biometricBridge.sendBiometricError(
+                "The login session is not ready yet. Please wait a moment and try again."
+        );
+        return;
     }
+
+    String script =
+            "(async function(){"
+                    + "function pack(o){"
+                    + "return 'OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o))));"
+                    + "}"
+                    + "function error(msg){"
+                    + "return 'ERROR:'+btoa(unescape(encodeURIComponent(msg||'Could not read the current login session.')));"
+                    + "}"
+                    + "try{"
+                    + "var session=null;"
+                    + "var user=(window.AppState&&AppState.user)?AppState.user:null;"
+
+                    // 1. First try the live Supabase session.
+                    + "if(window.sb&&sb.auth){"
+                    + "try{"
+                    + "var r=await sb.auth.getSession();"
+                    + "if(r&&r.data&&r.data.session){session=r.data.session;}"
+                    + "}catch(e){}"
+                    + "}"
+
+                    // 2. If there is no live session, use the refresh token
+                    // already maintained by index.html for this user.
+                    + "if(!session&&user&&user.id){"
+                    + "try{"
+                    + "var bioKey='edalen_bio_rt_'+user.id;"
+                    + "var bioRefreshToken=localStorage.getItem(bioKey);"
+                    + "if(bioRefreshToken&&window.sb&&sb.auth){"
+                    + "var rr=await sb.auth.refreshSession({refresh_token:bioRefreshToken});"
+                    + "if(rr&&rr.data&&rr.data.session){"
+                    + "session=rr.data.session;"
+                    + "}"
+                    + "}"
+                    + "}catch(e){}"
+                    + "}"
+
+                    // 3. One final normal refresh attempt.
+                    + "if(!session&&window.sb&&sb.auth){"
+                    + "try{"
+                    + "var r2=await sb.auth.refreshSession();"
+                    + "if(r2&&r2.data&&r2.data.session){session=r2.data.session;}"
+                    + "}catch(e){}"
+                    + "}"
+
+                    // 4. Make sure both tokens exist before saving.
+                    + "if(!session||!session.access_token||!session.refresh_token){"
+                    + "return error('The current Supabase login session could not be found. Please remain on the account screen for a moment and try again.');"
+                    + "}"
+
+                    // 5. Use the current user information where available.
+                    + "var sessionUser=session.user||null;"
+                    + "var finalUser=user||sessionUser;"
+                    + "var userInfo=finalUser?{"
+                    + "id:finalUser.id||'',"
+                    + "name:finalUser.name||'',"
+                    + "username:finalUser.username||'',"
+                    + "email:finalUser.email||''"
+                    + "}:null;"
+
+                    + "return pack({"
+                    + "access_token:session.access_token,"
+                    + "refresh_token:session.refresh_token,"
+                    + "user:userInfo"
+                    + "});"
+
+                    + "}catch(e){"
+                    + "return error(e&&e.message?e.message:'Could not read the current login session.');"
+                    + "}"
+                    + "})()";
+
+    webView.evaluateJavascript(script, value -> {
+        try {
+            String encoded = extractJavascriptString(value);
+
+            if (encoded == null || encoded.trim().isEmpty()) {
+                biometricBridge.sendBiometricError(
+                        "The app could not read the current login session. Please stay on this screen and try again."
+                );
+                return;
+            }
+
+            if (encoded.startsWith("ERROR:")) {
+                String message = decodeBase64Text(encoded.substring(6));
+
+                biometricBridge.sendBiometricError(
+                        message == null || message.trim().isEmpty()
+                                ? "Could not read the current login session."
+                                : message
+                );
+                return;
+            }
+
+            if (!encoded.startsWith("OK:")) {
+                biometricBridge.sendBiometricError(
+                        "Could not read the current login session. Please try again."
+                );
+                return;
+            }
+
+            JSONObject session = decodeBase64Json(encoded.substring(3));
+
+            if (session == null) {
+                biometricBridge.sendBiometricError(
+                        "Could not read the current login session. Please try again."
+                );
+                return;
+            }
+
+            String accessToken = session.optString("access_token", "");
+            String refreshToken = session.optString("refresh_token", "");
+
+            if (accessToken.isEmpty() || refreshToken.isEmpty()) {
+                biometricBridge.sendBiometricError(
+                        "Your current login session is incomplete. Please log in again."
+                );
+                return;
+            }
+
+            if (!saveEncryptedSession(session)) {
+                biometricBridge.sendBiometricError(
+                        "The phone could not securely save the biometric sign-in. Please try again."
+                );
+                return;
+            }
+
+            biometricBridge.sendBiometricSuccess("enable");
+
+        } catch (Exception e) {
+            biometricBridge.sendBiometricError(
+                    "Could not save the biometric sign-in. Please try again."
+            );
+        }
+    });
+}
 
     private String extractJavascriptString(String value) {
         if (value == null || "null".equals(value)) return null;
