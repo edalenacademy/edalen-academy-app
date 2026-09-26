@@ -1,8 +1,8 @@
 package com.edalenacademy.app;
 
-import android.content.Intent;
 import android.Manifest;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -29,6 +29,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
@@ -60,8 +61,12 @@ public class MainActivity extends FragmentActivity {
     private static final String KEYSTORE_NAME =
             "AndroidKeyStore";
 
+    /*
+     * New alias for the corrected biometric storage.
+     * This avoids an old/stale key interfering with the new save flow.
+     */
     private static final String BIOMETRIC_KEY_ALIAS =
-            "EdalenAcademyBiometricSessionKey";
+            "EdalenAcademyBiometricSessionKeyV3";
 
     private static final String PREFS_NAME =
             "edalen_native_biometric";
@@ -80,25 +85,19 @@ public class MainActivity extends FragmentActivity {
     private SwipeRefreshLayout swipeRefreshLayout;
     private NativeBiometricBridge biometricBridge;
 
-    private boolean isRefreshing = false;
-
     private PermissionRequest pendingPermissionRequest;
+    private boolean isRefreshing = false;
+    private String pendingBiometricAction = "";
 
     private final Handler handler =
             new Handler(Looper.getMainLooper());
-
-    private String pendingBiometricAction = "";
 
     private final Runnable sessionSyncRunnable =
             new Runnable() {
                 @Override
                 public void run() {
                     syncCurrentSupabaseSession();
-
-                    handler.postDelayed(
-                            this,
-                            3000
-                    );
+                    handler.postDelayed(this, 3000);
                 }
             };
 
@@ -121,50 +120,28 @@ public class MainActivity extends FragmentActivity {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-
-            int flags =
-                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            int flags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-                flags |=
-                        View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
             }
 
-            window.getDecorView()
-                    .setSystemUiVisibility(flags);
+            window.getDecorView().setSystemUiVisibility(flags);
         }
 
-        FrameLayout root =
-                new FrameLayout(this);
+        FrameLayout root = new FrameLayout(this);
 
-        swipeRefreshLayout =
-                new SwipeRefreshLayout(this);
+        swipeRefreshLayout = new SwipeRefreshLayout(this);
+        webView = new WebView(this);
 
-        webView =
-                new WebView(this);
-
-        FrameLayout.LayoutParams webViewParams =
+        FrameLayout.LayoutParams webParams =
                 new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT
                 );
 
-        swipeRefreshLayout.addView(
-                webView,
-                webViewParams
-        );
-
-        FrameLayout.LayoutParams swipeParams =
-                new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                );
-
-        root.addView(
-                swipeRefreshLayout,
-                swipeParams
-        );
+        swipeRefreshLayout.addView(webView, webParams);
+        root.addView(swipeRefreshLayout, webParams);
 
         setContentView(root);
 
@@ -186,76 +163,39 @@ public class MainActivity extends FragmentActivity {
 
                     } else {
 
-                        top =
-                                insets.getSystemWindowInsetTop();
-
-                        bottom =
-                                insets.getSystemWindowInsetBottom();
+                        top = insets.getSystemWindowInsetTop();
+                        bottom = insets.getSystemWindowInsetBottom();
                     }
 
-                    view.setPadding(
-                            0,
-                            top,
-                            0,
-                            bottom
-                    );
+                    view.setPadding(0, top, 0, bottom);
 
                     return insets;
                 }
         );
 
-        WebSettings settings =
-                webView.getSettings();
+        WebSettings settings = webView.getSettings();
 
         settings.setJavaScriptEnabled(true);
-
-        CookieManager
-                .getInstance()
-                .setAcceptThirdPartyCookies(
-                        webView,
-                        true
-                );
-
-        CookieManager
-                .getInstance()
-                .setAcceptCookie(true);
-
-        settings.setSupportMultipleWindows(false);
-
-        settings.setJavaScriptCanOpenWindowsAutomatically(
-                false
-        );
-
         settings.setDomStorageEnabled(true);
-
         settings.setDatabaseEnabled(true);
-
         settings.setAllowFileAccess(true);
-
         settings.setAllowContentAccess(true);
-
+        settings.setSupportMultipleWindows(false);
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
         settings.setLoadWithOverviewMode(false);
-
         settings.setUseWideViewPort(false);
-
-        settings.setCacheMode(
-                WebSettings.LOAD_DEFAULT
-        );
-
+        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setBuiltInZoomControls(false);
-
         settings.setDisplayZoomControls(false);
 
-        webView.setOverScrollMode(
-                View.OVER_SCROLL_NEVER
-        );
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance()
+                .setAcceptThirdPartyCookies(webView, true);
 
-        webView.setBackgroundColor(
-                Color.WHITE
-        );
+        webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        webView.setBackgroundColor(Color.WHITE);
 
-        biometricBridge =
-                new NativeBiometricBridge(this);
+        biometricBridge = new NativeBiometricBridge(this);
 
         webView.addJavascriptInterface(
                 biometricBridge,
@@ -271,78 +211,39 @@ public class MainActivity extends FragmentActivity {
                             WebResourceRequest request
                     ) {
 
-                        Uri uri =
-                                request.getUrl();
+                        Uri uri = request.getUrl();
+
+                        if (uri == null) {
+                            return false;
+                        }
+
+                        String host = uri.getHost();
 
                         /*
-                         * WhatsApp links
+                         * WhatsApp:
+                         * wa.link / wa.me / api.whatsapp.com
                          *
-                         * Open WhatsApp links outside
-                         * the WebView so Android/WhatsApp
-                         * can handle them correctly.
+                         * These are deliberately opened outside
+                         * the WebView so Android can hand them to
+                         * WhatsApp or the browser.
                          */
-                        if (uri != null
-                                && uri.getHost() != null
+                        if (host != null
                                 && (
-                                "wa.link".equalsIgnoreCase(
-                                        uri.getHost()
-                                )
+                                "wa.link".equalsIgnoreCase(host)
                                         ||
-                                "wa.me".equalsIgnoreCase(
-                                        uri.getHost()
-                                )
+                                "wa.me".equalsIgnoreCase(host)
                                         ||
-                                "api.whatsapp.com".equalsIgnoreCase(
-                                        uri.getHost()
-                                )
+                                "api.whatsapp.com".equalsIgnoreCase(host)
                         )) {
 
-                            Intent whatsappIntent =
-                                    new Intent(
-                                            Intent.ACTION_VIEW,
-                                            uri
-                                    );
-
-                            try {
-
-                                startActivity(
-                                        whatsappIntent
-                                );
-
-                            } catch (Exception e) {
-
-                                /*
-                                 * If WhatsApp is not installed,
-                                 * allow Android/browser to handle
-                                 * the link.
-                                 */
-                                try {
-
-                                    whatsappIntent.setPackage(
-                                            null
-                                    );
-
-                                    startActivity(
-                                            whatsappIntent
-                                    );
-
-                                } catch (Exception ignored) {
-
-                                    return false;
-                                }
-                            }
-
+                            openExternal(uri);
                             return true;
                         }
 
                         /*
-                         * Jitsi meeting links
+                         * Jitsi meetings.
                          */
-                        if (uri != null
-                                && "meet.jit.si"
-                                .equalsIgnoreCase(
-                                        uri.getHost()
-                                )) {
+                        if ("meet.jit.si".equalsIgnoreCase(host)) {
 
                             Intent intent =
                                     new Intent(
@@ -350,9 +251,7 @@ public class MainActivity extends FragmentActivity {
                                             uri
                                     );
 
-                            intent.setPackage(
-                                    "org.jitsi.meet"
-                            );
+                            intent.setPackage("org.jitsi.meet");
 
                             try {
 
@@ -362,7 +261,10 @@ public class MainActivity extends FragmentActivity {
 
                                 intent.setPackage(null);
 
-                                startActivity(intent);
+                                try {
+                                    startActivity(intent);
+                                } catch (Exception ignored) {
+                                }
                             }
 
                             return true;
@@ -387,9 +289,7 @@ public class MainActivity extends FragmentActivity {
                         isRefreshing = true;
 
                         if (swipeRefreshLayout != null) {
-
-                            swipeRefreshLayout
-                                    .setRefreshing(true);
+                            swipeRefreshLayout.setRefreshing(true);
                         }
                     }
 
@@ -399,17 +299,12 @@ public class MainActivity extends FragmentActivity {
                             String url
                     ) {
 
-                        super.onPageFinished(
-                                view,
-                                url
-                        );
+                        super.onPageFinished(view, url);
 
                         isRefreshing = false;
 
                         if (swipeRefreshLayout != null) {
-
-                            swipeRefreshLayout
-                                    .setRefreshing(false);
+                            swipeRefreshLayout.setRefreshing(false);
                         }
 
                         installNativeBiometricJavascript();
@@ -440,9 +335,7 @@ public class MainActivity extends FragmentActivity {
                         isRefreshing = false;
 
                         if (swipeRefreshLayout != null) {
-
-                            swipeRefreshLayout
-                                    .setRefreshing(false);
+                            swipeRefreshLayout.setRefreshing(false);
                         }
                     }
                 }
@@ -456,7 +349,8 @@ public class MainActivity extends FragmentActivity {
 
         swipeRefreshLayout.setOnChildScrollUpCallback(
                 (parent, child) ->
-                        webView.getScrollY() > 0
+                        webView != null
+                                && webView.getScrollY() > 0
         );
 
         webView.setWebChromeClient(
@@ -517,8 +411,7 @@ public class MainActivity extends FragmentActivity {
 
                             } else {
 
-                                pendingPermissionRequest =
-                                        request;
+                                pendingPermissionRequest = request;
 
                                 requestMediaPermissions(
                                         needsCamera,
@@ -532,17 +425,14 @@ public class MainActivity extends FragmentActivity {
                     public boolean onShowFileChooser(
                             WebView view,
                             ValueCallback<Uri[]> callback,
-                            FileChooserParams fileChooserParams
+                            FileChooserParams params
                     ) {
 
                         if (filePathCallback != null) {
-
-                            filePathCallback
-                                    .onReceiveValue(null);
+                            filePathCallback.onReceiveValue(null);
                         }
 
-                        filePathCallback =
-                                callback;
+                        filePathCallback = callback;
 
                         Intent intent =
                                 new Intent(
@@ -567,13 +457,10 @@ public class MainActivity extends FragmentActivity {
                                     FILE_CHOOSER_REQUEST
                             );
 
-                        } catch (Exception exception) {
+                        } catch (Exception e) {
 
                             filePathCallback = null;
-
-                            callback.onReceiveValue(
-                                    null
-                            );
+                            callback.onReceiveValue(null);
 
                             return false;
                         }
@@ -583,37 +470,17 @@ public class MainActivity extends FragmentActivity {
                 }
         );
 
-        Button refreshButton =
-                new Button(this);
+        Button refreshButton = new Button(this);
 
         refreshButton.setText("\u21BB");
-
         refreshButton.setTextSize(23);
-
-        refreshButton.setTextColor(
-                Color.WHITE
-        );
-
-        refreshButton.setGravity(
-                Gravity.CENTER
-        );
-
-        refreshButton.setPadding(
-                0,
-                0,
-                0,
-                0
-        );
-
+        refreshButton.setTextColor(Color.WHITE);
+        refreshButton.setGravity(Gravity.CENTER);
+        refreshButton.setPadding(0, 0, 0, 0);
         refreshButton.setMinWidth(0);
-
         refreshButton.setMinHeight(0);
-
         refreshButton.setAllCaps(false);
-
-        refreshButton.setContentDescription(
-                "Refresh page"
-        );
+        refreshButton.setContentDescription("Refresh page");
 
         GradientDrawable refreshBackground =
                 new GradientDrawable();
@@ -626,9 +493,7 @@ public class MainActivity extends FragmentActivity {
                 Color.rgb(25, 45, 75)
         );
 
-        refreshButton.setBackground(
-                refreshBackground
-        );
+        refreshButton.setBackground(refreshBackground);
 
         refreshButton.setOnClickListener(
                 view -> refreshPageSafely()
@@ -648,41 +513,48 @@ public class MainActivity extends FragmentActivity {
                 dpToPx(112)
         );
 
-        root.addView(
-                refreshButton,
-                refreshParams
-        );
+        root.addView(refreshButton, refreshParams);
 
-        refreshButton.setVisibility(
-                View.GONE
-        );
+        refreshButton.setVisibility(View.GONE);
 
         webView.loadUrl(APP_URL);
     }
 
+    private void openExternal(Uri uri) {
+
+        try {
+
+            Intent intent =
+                    new Intent(
+                            Intent.ACTION_VIEW,
+                            uri
+                    );
+
+            startActivity(intent);
+
+        } catch (Exception e) {
+
+            Toast.makeText(
+                    this,
+                    "No app is available to open this link.",
+                    Toast.LENGTH_SHORT
+            ).show();
+        }
+    }
+
     private void refreshPageSafely() {
 
-        if (webView == null
-                || isRefreshing) {
-
+        if (webView == null || isRefreshing) {
             return;
         }
 
         isRefreshing = true;
 
         if (swipeRefreshLayout != null) {
-
-            swipeRefreshLayout
-                    .setRefreshing(true);
+            swipeRefreshLayout.setRefreshing(true);
         }
 
-        webView.post(() -> {
-
-            if (webView != null) {
-
-                webView.reload();
-            }
-        });
+        webView.reload();
     }
 
     private void installNativeBiometricJavascript() {
@@ -693,83 +565,30 @@ public class MainActivity extends FragmentActivity {
 
         String script =
                 "(function(){"
-                        + "if(window.__edalenNativeBiometricInstalled)return;"
-                        + "if(!window.EdalenNative)return;"
-                        + "window.__edalenNativeBiometricInstalled=true;"
-
-                        + "window.biometricSupported=function(){"
-                        + "return !!EdalenNative.isBiometricAvailable();"
-                        + "};"
-
-                        + "window.biometricLoginInfo=function(){"
-                        + "if(!EdalenNative.isBiometricAvailable())return null;"
-                        + "if(!EdalenNative.hasStoredSession())return null;"
-                        + "var u=EdalenNative.getStoredUser();"
-                        + "if(!u)return null;"
-                        + "return {id:u.id,name:u.name||'',username:u.username||''};"
-                        + "};"
-
-                        + "window.biometricSettingsCardHtml=function(u){"
-                        + "if(!u||!u.id)return '';"
-                        + "if(!EdalenNative.isBiometricAvailable())"
-                        + "return '<div class=\"card\"><div class=\"card-title\">Biometric login</div>"
-                        + "<p style=\"color:var(--text-soft);\">This device does not have an available fingerprint or Face ID biometric.</p></div>';"
-
-                        + "var enabled=EdalenNative.hasStoredSession();"
-
-                        + "return '<div class=\"card\"><div class=\"card-title\">Biometric login</div>'"
-                        + "+'<p style=\"color:var(--text-soft);\">'"
-                        + "+(enabled"
-                        + "? 'Fingerprint / Face ID login is <b>on</b> for this device.'"
-                        + ": 'Turn on fingerprint or Face ID to log in without typing your password.')"
-                        + "+'</p>'"
-                        + "+(enabled"
-                        + "? '<button class=\"btn btn-ghost\" data-action=\"disable-biometric\">Turn off on this device</button>'"
-                        + ": '<button class=\"btn btn-primary\" data-action=\"enable-biometric\">Enable fingerprint login</button>')"
-                        + "+'</div>';"
-                        + "};"
-
-                        + "window.enableBiometricLogin=function(){"
-                        + "if(!EdalenNative.isBiometricAvailable()){"
-                        + "if(typeof toast==='function')toast('No fingerprint or Face ID is available on this device.');"
-                        + "return;"
-                        + "}"
-                        + "if(typeof toast==='function')toast('Touch the fingerprint sensor or use Face ID to continue.');"
-                        + "EdalenNative.enableBiometric();"
-                        + "};"
-
-                        + "window.disableBiometricLogin=function(){"
-                        + "EdalenNative.disableBiometric();"
-                        + "if(typeof toast==='function')toast('Fingerprint login turned off on this device.');"
-                        + "if(typeof render==='function')render();"
-                        + "};"
-
                         + "window.attemptBiometricLoginAtAuth=function(){"
-                        + "if(!EdalenNative.hasStoredSession()){"
-                        + "if(typeof toast==='function')toast('Biometric login isn\\'t set up on this device.');"
+                        + "try{"
+                        + "if(!window.EdalenNative||!EdalenNative.hasStoredSession()){"
+                        + "if(typeof toast==='function')toast('Biometric login is not set up on this device.');"
                         + "return;"
                         + "}"
                         + "if(typeof toast==='function')toast('Hold on pls… verifying your fingerprint or Face ID.');"
                         + "EdalenNative.authenticateBiometric('login');"
-                        + "};"
-                                    + "window.attemptBiometricLoginAtAuth=function(){"
-                        + "if(!EdalenNative.hasStoredSession()){"
-                        + "if(typeof toast==='function')toast('Biometric login isn\\'t set up on this device.');"
-                        + "return;"
+                        + "}catch(e){"
+                        + "if(typeof toast==='function')toast('Biometric login is unavailable.');"
                         + "}"
-                        + "if(typeof toast==='function')toast('Hold on pls… verifying your fingerprint or Face ID.');"
-                        + "EdalenNative.authenticateBiometric('login');"
                         + "};"
-
                         + "window.attemptBiometricUnlock=function(){"
-                        + "if(!EdalenNative.hasStoredSession()){"
-                        + "if(typeof toast==='function')toast('Biometric login isn\\'t set up on this device.');"
+                        + "try{"
+                        + "if(!window.EdalenNative||!EdalenNative.hasStoredSession()){"
+                        + "if(typeof toast==='function')toast('Biometric login is not set up on this device.');"
                         + "return;"
                         + "}"
                         + "if(typeof toast==='function')toast('Hold on pls… verifying your fingerprint or Face ID.');"
                         + "EdalenNative.authenticateBiometric('unlock');"
+                        + "}catch(e){"
+                        + "if(typeof toast==='function')toast('Biometric login is unavailable.');"
+                        + "}"
                         + "};"
-
                         + "window.nativeBiometricSuccess=function(action){"
                         + "if(action==='enable'){"
                         + "if(typeof toast==='function')toast('Fingerprint / Face ID login enabled on this device.');"
@@ -780,22 +599,18 @@ public class MainActivity extends FragmentActivity {
                         + "if(window.AppState)AppState.biometricLockPending=false;"
                         + "if(typeof render==='function')render();"
                         + "};"
-
                         + "window.nativeBiometricError=function(message){"
                         + "if(typeof toast==='function')toast(message||'Biometric verification failed.');"
                         + "};"
-
                         + "})();";
 
-        webView.evaluateJavascript(
-                script,
-                null
-        );
+        webView.evaluateJavascript(script, null);
     }
 
     private void enforceNativeBiometricLock() {
 
         if (webView == null
+                || biometricBridge == null
                 || !biometricBridge.hasStoredSession()) {
 
             return;
@@ -809,10 +624,7 @@ public class MainActivity extends FragmentActivity {
                         + "}"
                         + "})();";
 
-        webView.evaluateJavascript(
-                script,
-                null
-        );
+        webView.evaluateJavascript(script, null);
     }
 
     private void syncCurrentSupabaseSession() {
@@ -824,17 +636,14 @@ public class MainActivity extends FragmentActivity {
         String script =
                 "(async function(){"
                         + "try{"
-                        + "if(!window.sb||!sb.auth)return null;"
+                        + "if(!window.sb||!sb.auth)return '';"
                         + "var r=await sb.auth.getSession();"
-                        + "if(!r||!r.data||!r.data.session)return null;"
+                        + "if(!r||!r.data||!r.data.session)return '';"
                         + "var s=r.data.session;"
                         + "var u=(window.AppState&&AppState.user)?AppState.user:null;"
-                        + "return JSON.stringify({"
-                        + "access_token:s.access_token,"
-                        + "refresh_token:s.refresh_token,"
-                        + "user:u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null"
-                        + "});"
-                        + "}catch(e){return null;}"
+                        + "var o={access_token:s.access_token,refresh_token:s.refresh_token,user:u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null};"
+                        + "return btoa(unescape(encodeURIComponent(JSON.stringify(o))));"
+                        + "}catch(e){return '';}"
                         + "})()";
 
         webView.evaluateJavascript(
@@ -844,7 +653,8 @@ public class MainActivity extends FragmentActivity {
                     try {
 
                         if (value == null
-                                || "null".equals(value)) {
+                                || "null".equals(value)
+                                || "\"\"".equals(value)) {
 
                             return;
                         }
@@ -857,28 +667,27 @@ public class MainActivity extends FragmentActivity {
                             return;
                         }
 
-                        String json =
+                        String encoded =
                                 (String) parsed;
 
-                        if (json == null
-                                || json.equals("null")
-                                || json.trim().isEmpty()) {
-
+                        if (encoded == null
+                                || encoded.trim().isEmpty()) {
                             return;
                         }
 
                         JSONObject session =
-                                new JSONObject(json);
+                                decodeBase64Json(encoded);
 
-                        if (!session.has("access_token")
-                                || !session.has("refresh_token")) {
-
+                        if (session == null) {
                             return;
                         }
 
-                        saveEncryptedSession(
-                                session
-                        );
+                        if (!session.has("access_token")
+                                || !session.has("refresh_token")) {
+                            return;
+                        }
+
+                        saveEncryptedSession(session);
 
                     } catch (Exception ignored) {
                     }
@@ -886,9 +695,201 @@ public class MainActivity extends FragmentActivity {
         );
     }
 
-    private void restoreStoredSession(
-            String action
-    ) {
+    private void captureCurrentSessionForBiometric() {
+
+        if (webView == null) {
+
+            biometricBridge.sendBiometricError(
+                    "The login session is not ready yet. Please wait a moment and try again."
+            );
+
+            return;
+        }
+
+        String script =
+                "(async function(){"
+                        + "try{"
+                        + "if(!window.sb||!sb.auth)throw new Error('Authentication service is not ready.');"
+                        + "var r=await sb.auth.getSession();"
+                        + "if(!r||!r.data||!r.data.session)throw new Error('Please sign in first.');"
+                        + "var s=r.data.session;"
+                        + "if(!s.access_token||!s.refresh_token)throw new Error('The current login session is incomplete.');"
+                        + "var u=(window.AppState&&AppState.user)?AppState.user:null;"
+                        + "var o={access_token:s.access_token,refresh_token:s.refresh_token,user:u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null};"
+                        + "return btoa(unescape(encodeURIComponent(JSON.stringify(o))));"
+                        + "}catch(e){"
+                        + "return 'ERROR:'+btoa(unescape(encodeURIComponent(e.message||'Could not capture the current sign-in.')));"
+                        + "}"
+                        + "})()";
+
+        webView.evaluateJavascript(
+                script,
+                value -> {
+
+                    try {
+
+                        if (value == null
+                                || "null".equals(value)) {
+
+                            biometricBridge.sendBiometricError(
+                                    "The app could not read the current login session."
+                            );
+
+                            return;
+                        }
+
+                        Object parsed =
+                                new JSONTokener(value)
+                                        .nextValue();
+
+                        if (!(parsed instanceof String)) {
+
+                            biometricBridge.sendBiometricError(
+                                    "The app could not read the current login session."
+                            );
+
+                            return;
+                        }
+
+                        String encoded =
+                                (String) parsed;
+
+                        if (encoded == null
+                                || encoded.trim().isEmpty()) {
+
+                            biometricBridge.sendBiometricError(
+                                    "The current login session is empty. Please log in again."
+                            );
+
+                            return;
+                        }
+
+                        if (encoded.startsWith("ERROR:")) {
+
+                            String errorText =
+                                    encoded.substring(6);
+
+                            String message =
+                                    decodeBase64Text(errorText);
+
+                            biometricBridge.sendBiometricError(
+                                    message == null
+                                            || message.trim().isEmpty()
+                                            ? "Could not capture the current sign-in."
+                                            : message
+                            );
+
+                            return;
+                        }
+
+                        JSONObject session =
+                                decodeBase64Json(encoded);
+
+                        if (session == null) {
+
+                            biometricBridge.sendBiometricError(
+                                    "Could not read the current login session."
+                            );
+
+                            return;
+                        }
+
+                        String accessToken =
+                                session.optString(
+                                        "access_token",
+                                        ""
+                                );
+
+                        String refreshToken =
+                                session.optString(
+                                        "refresh_token",
+                                        ""
+                                );
+
+                        if (accessToken.isEmpty()
+                                || refreshToken.isEmpty()) {
+
+                            biometricBridge.sendBiometricError(
+                                    "Your current login session is incomplete. Please log in again."
+                            );
+
+                            return;
+                        }
+
+                        boolean saved =
+                                saveEncryptedSession(
+                                        session
+                                );
+
+                        if (!saved) {
+
+                            biometricBridge.sendBiometricError(
+                                    "The phone could not securely save the biometric sign-in. Please try again."
+                            );
+
+                            return;
+                        }
+
+                        biometricBridge.sendBiometricSuccess(
+                                "enable"
+                        );
+
+                    } catch (Exception e) {
+
+                        biometricBridge.sendBiometricError(
+                                "Could not save the biometric sign-in. Please try again."
+                        );
+                    }
+                }
+        );
+    }
+
+    private JSONObject decodeBase64Json(String encoded) {
+
+        try {
+
+            byte[] bytes =
+                    Base64.decode(
+                            encoded,
+                            Base64.DEFAULT
+                    );
+
+            String json =
+                    new String(
+                            bytes,
+                            StandardCharsets.UTF_8
+                    );
+
+            return new JSONObject(json);
+
+        } catch (Exception e) {
+
+            return null;
+        }
+    }
+
+    private String decodeBase64Text(String encoded) {
+
+        try {
+
+            byte[] bytes =
+                    Base64.decode(
+                            encoded,
+                            Base64.DEFAULT
+                    );
+
+            return new String(
+                    bytes,
+                    StandardCharsets.UTF_8
+            );
+
+        } catch (Exception e) {
+
+            return null;
+        }
+    }
+
+    private void restoreStoredSession(String action) {
 
         JSONObject stored =
                 loadEncryptedSession();
@@ -896,8 +897,7 @@ public class MainActivity extends FragmentActivity {
         if (stored == null) {
 
             callJavascript(
-                    "window.nativeBiometricError && "
-                            + "window.nativeBiometricError("
+                    "window.nativeBiometricError&&window.nativeBiometricError("
                             + JSONObject.quote(
                                     "Your saved biometric sign-in is unavailable. Please log in normally."
                             )
@@ -923,8 +923,7 @@ public class MainActivity extends FragmentActivity {
                 || refreshToken.isEmpty()) {
 
             callJavascript(
-                    "window.nativeBiometricError && "
-                            + "window.nativeBiometricError("
+                    "window.nativeBiometricError&&window.nativeBiometricError("
                             + JSONObject.quote(
                                     "Your saved sign-in is unavailable. Please log in normally."
                             )
@@ -935,7 +934,7 @@ public class MainActivity extends FragmentActivity {
         }
 
         callJavascript(
-                "window.toast && window.toast("
+                "window.toast&&window.toast("
                         + JSONObject.quote(
                                 "Hold on pls… signing you in."
                         )
@@ -976,91 +975,10 @@ public class MainActivity extends FragmentActivity {
                         + "}"
                         + "})()";
 
-        webView.evaluateJavascript(
-                script,
-                null
-        );
+        webView.evaluateJavascript(script, null);
     }
 
-    private void captureCurrentSessionForBiometric() {
-
-        String script =
-                "(async function(){"
-                        + "try{"
-                        + "if(!window.sb||!sb.auth)throw new Error('Authentication service is not ready.');"
-                        + "var r=await sb.auth.getSession();"
-                        + "if(!r||!r.data||!r.data.session)throw new Error('Please sign in first.');"
-                        + "var s=r.data.session;"
-                        + "var u=(window.AppState&&AppState.user)?AppState.user:null;"
-                        + "return JSON.stringify({"
-                        + "access_token:s.access_token,"
-                        + "refresh_token:s.refresh_token,"
-                        + "user:u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null"
-                        + "});"
-                        + "}catch(e){return JSON.stringify({error:e.message||'Could not save the sign-in.'});}"
-                        + "})()";
-
-        webView.evaluateJavascript(
-                script,
-                value -> {
-
-                    try {
-
-                        Object parsed =
-                                new JSONTokener(value)
-                                        .nextValue();
-
-                        if (!(parsed instanceof String)) {
-
-                            biometricBridge
-                                    .sendBiometricError(
-                                            "Could not save the biometric sign-in."
-                                    );
-
-                            return;
-                        }
-
-                        JSONObject result =
-                                new JSONObject(
-                                        (String) parsed
-                                );
-
-                        if (result.has("error")) {
-
-                            biometricBridge
-                                    .sendBiometricError(
-                                            result.optString(
-                                                    "error",
-                                                    "Could not save the biometric sign-in."
-                                            )
-                                    );
-
-                            return;
-                        }
-
-                        saveEncryptedSession(
-                                result
-                        );
-
-                        biometricBridge
-                                .sendBiometricSuccess(
-                                        "enable"
-                                );
-
-                    } catch (Exception e) {
-
-                        biometricBridge
-                                .sendBiometricError(
-                                        "Could not save the biometric sign-in."
-                                );
-                    }
-                }
-        );
-    }
-
-    private void callJavascript(
-            String javascript
-    ) {
+    private void callJavascript(String javascript) {
 
         if (webView == null) {
             return;
@@ -1108,6 +1026,7 @@ public class MainActivity extends FragmentActivity {
                                 |
                         KeyProperties.PURPOSE_DECRYPT
                 )
+                        .setKeySize(256)
                         .setBlockModes(
                                 KeyProperties.BLOCK_MODE_GCM
                         )
@@ -1121,7 +1040,7 @@ public class MainActivity extends FragmentActivity {
         return keyGenerator.generateKey();
     }
 
-    private void saveEncryptedSession(
+    private boolean saveEncryptedSession(
             JSONObject session
     ) {
 
@@ -1147,12 +1066,17 @@ public class MainActivity extends FragmentActivity {
                             );
 
             byte[] encrypted =
-                    cipher.doFinal(
-                            plaintext
-                    );
+                    cipher.doFinal(plaintext);
 
             byte[] iv =
                     cipher.getIV();
+
+            if (iv == null
+                    || iv.length == 0
+                    || encrypted.length == 0) {
+
+                return false;
+            }
 
             SharedPreferences prefs =
                     getSharedPreferences(
@@ -1161,34 +1085,41 @@ public class MainActivity extends FragmentActivity {
                     );
 
             JSONObject user =
-                    session.optJSONObject(
-                            "user"
-                    );
+                    session.optJSONObject("user");
 
-            prefs.edit()
-                    .putString(
-                            PREF_CIPHERTEXT,
-                            Base64.encodeToString(
-                                    encrypted,
-                                    Base64.NO_WRAP
+            boolean committed =
+                    prefs.edit()
+                            .putString(
+                                    PREF_CIPHERTEXT,
+                                    Base64.encodeToString(
+                                            encrypted,
+                                            Base64.NO_WRAP
+                                    )
                             )
-                    )
-                    .putString(
-                            PREF_IV,
-                            Base64.encodeToString(
-                                    iv,
-                                    Base64.NO_WRAP
+                            .putString(
+                                    PREF_IV,
+                                    Base64.encodeToString(
+                                            iv,
+                                            Base64.NO_WRAP
+                                    )
                             )
-                    )
-                    .putString(
-                            PREF_USER,
-                            user != null
-                                    ? user.toString()
-                                    : ""
-                    )
-                    .apply();
+                            .putString(
+                                    PREF_USER,
+                                    user != null
+                                            ? user.toString()
+                                            : ""
+                            )
+                            .commit();
 
-        } catch (Exception ignored) {
+            if (!committed) {
+                return false;
+            }
+
+            return hasStoredBiometricSession();
+
+        } catch (Exception e) {
+
+            return false;
         }
     }
 
@@ -1215,7 +1146,9 @@ public class MainActivity extends FragmentActivity {
                     );
 
             if (encryptedText == null
-                    || ivText == null) {
+                    || ivText == null
+                    || encryptedText.isEmpty()
+                    || ivText.isEmpty()) {
 
                 return null;
             }
@@ -1250,17 +1183,14 @@ public class MainActivity extends FragmentActivity {
             );
 
             byte[] decrypted =
-                    cipher.doFinal(
-                            encrypted
-                    );
+                    cipher.doFinal(encrypted);
 
-            String json =
+            return new JSONObject(
                     new String(
                             decrypted,
                             StandardCharsets.UTF_8
-                    );
-
-            return new JSONObject(json);
+                    )
+            );
 
         } catch (Exception e) {
 
@@ -1282,7 +1212,7 @@ public class MainActivity extends FragmentActivity {
                     .remove(PREF_CIPHERTEXT)
                     .remove(PREF_IV)
                     .remove(PREF_USER)
-                    .apply();
+                    .commit();
 
         } catch (Exception ignored) {
         }
@@ -1349,44 +1279,43 @@ public class MainActivity extends FragmentActivity {
             boolean needAudio
     ) {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return;
+        }
 
-            ArrayList<String> permissions =
-                    new ArrayList<>();
+        ArrayList<String> permissions =
+                new ArrayList<>();
 
-            if (needCamera
-                    &&
-                    checkSelfPermission(
-                            Manifest.permission.CAMERA
-                    )
-                            != PackageManager.PERMISSION_GRANTED) {
-
-                permissions.add(
+        if (needCamera
+                && checkSelfPermission(
                         Manifest.permission.CAMERA
-                );
-            }
+                )
+                        != PackageManager.PERMISSION_GRANTED) {
 
-            if (needAudio
-                    &&
-                    checkSelfPermission(
-                            Manifest.permission.RECORD_AUDIO
-                    )
-                            != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(
+                    Manifest.permission.CAMERA
+            );
+        }
 
-                permissions.add(
+        if (needAudio
+                && checkSelfPermission(
                         Manifest.permission.RECORD_AUDIO
-                );
-            }
+                )
+                        != PackageManager.PERMISSION_GRANTED) {
 
-            if (!permissions.isEmpty()) {
+            permissions.add(
+                    Manifest.permission.RECORD_AUDIO
+            );
+        }
 
-                requestPermissions(
-                        permissions.toArray(
-                                new String[0]
-                        ),
-                        MEDIA_PERMISSION_REQUEST
-                );
-            }
+        if (!permissions.isEmpty()) {
+
+            requestPermissions(
+                    permissions.toArray(
+                            new String[0]
+                    ),
+                    MEDIA_PERMISSION_REQUEST
+            );
         }
     }
 
@@ -1413,20 +1342,16 @@ public class MainActivity extends FragmentActivity {
             Uri[] results = null;
 
             if (resultCode == RESULT_OK
-                    && data != null) {
+                    && data != null
+                    && data.getData() != null) {
 
-                if (data.getData() != null) {
-
-                    results =
-                            new Uri[]{
-                                    data.getData()
-                            };
-                }
+                results =
+                        new Uri[]{
+                                data.getData()
+                        };
             }
 
-            filePathCallback
-                    .onReceiveValue(results);
-
+            filePathCallback.onReceiveValue(results);
             filePathCallback = null;
         }
     }
@@ -1444,63 +1369,56 @@ public class MainActivity extends FragmentActivity {
                 grantResults
         );
 
-        if (requestCode ==
-                MEDIA_PERMISSION_REQUEST
-                &&
-                pendingPermissionRequest != null) {
-
-            boolean cameraAllowed =
-                    checkSelfPermission(
-                            Manifest.permission.CAMERA
-                    )
-                            ==
-                    PackageManager.PERMISSION_GRANTED;
-
-            boolean microphoneAllowed =
-                    checkSelfPermission(
-                            Manifest.permission.RECORD_AUDIO
-                    )
-                            ==
-                    PackageManager.PERMISSION_GRANTED;
-
-            String[] resources =
-                    pendingPermissionRequest
-                            .getResources();
-
-            boolean allowed = true;
-
-            for (String resource : resources) {
-
-                if (PermissionRequest
-                        .RESOURCE_VIDEO_CAPTURE
-                        .equals(resource)
-                        && !cameraAllowed) {
-
-                    allowed = false;
-                }
-
-                if (PermissionRequest
-                        .RESOURCE_AUDIO_CAPTURE
-                        .equals(resource)
-                        && !microphoneAllowed) {
-
-                    allowed = false;
-                }
-            }
-
-            if (allowed) {
-
-                pendingPermissionRequest
-                        .grant(resources);
-
-            } else {
-
-                pendingPermissionRequest
-                        .deny();
-            }
-
-            pendingPermissionRequest = null;
+        if (requestCode != MEDIA_PERMISSION_REQUEST
+                || pendingPermissionRequest == null) {
+            return;
         }
+
+        boolean cameraAllowed =
+                checkSelfPermission(
+                        Manifest.permission.CAMERA
+                )
+                        ==
+                PackageManager.PERMISSION_GRANTED;
+
+        boolean microphoneAllowed =
+                checkSelfPermission(
+                        Manifest.permission.RECORD_AUDIO
+                )
+                        ==
+                PackageManager.PERMISSION_GRANTED;
+
+        String[] resources =
+                pendingPermissionRequest.getResources();
+
+        boolean allowed = true;
+
+        for (String resource : resources) {
+
+            if (PermissionRequest
+                    .RESOURCE_VIDEO_CAPTURE
+                    .equals(resource)
+                    && !cameraAllowed) {
+
+                allowed = false;
+            }
+
+            if (PermissionRequest
+                    .RESOURCE_AUDIO_CAPTURE
+                    .equals(resource)
+                    && !microphoneAllowed) {
+
+                allowed = false;
+            }
+        }
+
+        if (allowed) {
+            pendingPermissionRequest.grant(resources);
+        } else {
+            pendingPermissionRequest.deny();
+        }
+
+        pendingPermissionRequest = null;
     }
 
     private int dpToPx(int dp) {
@@ -1510,9 +1428,7 @@ public class MainActivity extends FragmentActivity {
                         .getDisplayMetrics()
                         .density;
 
-        return Math.round(
-                dp * density
-        );
+        return Math.round(dp * density);
     }
 
     @Override
@@ -1532,9 +1448,7 @@ public class MainActivity extends FragmentActivity {
     @Override
     protected void onDestroy() {
 
-        handler.removeCallbacksAndMessages(
-                null
-        );
+        handler.removeCallbacksAndMessages(null);
 
         if (webView != null) {
 
@@ -1543,7 +1457,6 @@ public class MainActivity extends FragmentActivity {
             );
 
             webView.destroy();
-
             webView = null;
         }
 
@@ -1558,17 +1471,14 @@ public class MainActivity extends FragmentActivity {
                 MainActivity activity
         ) {
 
-            this.activity =
-                    activity;
+            this.activity = activity;
         }
 
         @JavascriptInterface
         public boolean isBiometricAvailable() {
 
             BiometricManager manager =
-                    BiometricManager.from(
-                            activity
-                    );
+                    BiometricManager.from(activity);
 
             int result =
                     manager.canAuthenticate(
@@ -1582,8 +1492,7 @@ public class MainActivity extends FragmentActivity {
                     );
 
             return result ==
-                    BiometricManager
-                            .BIOMETRIC_SUCCESS;
+                    BiometricManager.BIOMETRIC_SUCCESS;
         }
 
         @JavascriptInterface
@@ -1596,8 +1505,7 @@ public class MainActivity extends FragmentActivity {
         public String getStoredUser() {
 
             JSONObject user =
-                    MainActivity.this
-                            .getStoredUser();
+                    MainActivity.this.getStoredUser();
 
             return user == null
                     ? "null"
@@ -1607,9 +1515,7 @@ public class MainActivity extends FragmentActivity {
         @JavascriptInterface
         public void enableBiometric() {
 
-            pendingBiometricAction =
-                    "enable";
-
+            pendingBiometricAction = "enable";
             authenticateNative();
         }
 
@@ -1624,9 +1530,7 @@ public class MainActivity extends FragmentActivity {
                 action = "login";
             }
 
-            pendingBiometricAction =
-                    action;
-
+            pendingBiometricAction = action;
             authenticateNative();
         }
 
@@ -1639,7 +1543,7 @@ public class MainActivity extends FragmentActivity {
                         clearStoredBiometricSession();
 
                         callJavascript(
-                                "window.render && window.render();"
+                                "window.render&&window.render();"
                         );
                     }
             );
@@ -1689,13 +1593,11 @@ public class MainActivity extends FragmentActivity {
                                                         .equals(action)) {
 
                                                     callJavascript(
-                                                            "window.toast && window.toast("
-                                                                    +
-                                                                    JSONObject.quote(
+                                                            "window.toast&&window.toast("
+                                                                    + JSONObject.quote(
                                                                             "Hold on pls… saving your biometric login."
                                                                     )
-                                                                    +
-                                                                    ");"
+                                                                    + ");"
                                                     );
 
                                                     captureCurrentSessionForBiometric();
@@ -1703,13 +1605,11 @@ public class MainActivity extends FragmentActivity {
                                                 } else {
 
                                                     callJavascript(
-                                                            "window.toast && window.toast("
-                                                                    +
-                                                                    JSONObject.quote(
+                                                            "window.toast&&window.toast("
+                                                                    + JSONObject.quote(
                                                                             "Hold on pls… signing you in."
                                                                     )
-                                                                    +
-                                                                    ");"
+                                                                    + ");"
                                                     );
 
                                                     restoreStoredSession(
@@ -1744,18 +1644,20 @@ public class MainActivity extends FragmentActivity {
                                                         .onAuthenticationFailed();
 
                                                 callJavascript(
-                                                        "window.toast && window.toast("
-                                                                +
-                                                                JSONObject.quote(
+                                                        "window.toast&&window.toast("
+                                                                + JSONObject.quote(
                                                                         "Fingerprint or Face ID not recognized. Try again."
                                                                 )
-                                                                +
-                                                                ");"
+                                                                + ");"
                                                 );
                                             }
                                         }
                                 );
 
+                        /*
+                         * Non-CryptoObject BiometricPrompt.
+                         * STRONG + WEAK are allowed here.
+                         */
                         BiometricPrompt.PromptInfo promptInfo =
                                 new BiometricPrompt.PromptInfo.Builder()
                                         .setTitle(
@@ -1790,15 +1692,10 @@ public class MainActivity extends FragmentActivity {
         ) {
 
             callJavascript(
-                    "window.nativeBiometricSuccess && "
-                            +
-                            "window.nativeBiometricSuccess("
-                            +
-                            JSONObject.quote(
-                                    action
-                            )
-                            +
-                            ");"
+                    "window.nativeBiometricSuccess&&"
+                            + "window.nativeBiometricSuccess("
+                            + JSONObject.quote(action)
+                            + ");"
             );
         }
 
@@ -1807,17 +1704,15 @@ public class MainActivity extends FragmentActivity {
         ) {
 
             callJavascript(
-                    "window.nativeBiometricError && "
-                            +
-                            "window.nativeBiometricError("
-                            +
-                            JSONObject.quote(
-                                    message
+                    "window.nativeBiometricError&&"
+                            + "window.nativeBiometricError("
+                            + JSONObject.quote(
+                                    message == null
+                                            ? "Biometric verification failed."
+                                            : message
                             )
-                            +
-                            ");"
+                            + ");"
             );
         }
     }
 }
-                    
