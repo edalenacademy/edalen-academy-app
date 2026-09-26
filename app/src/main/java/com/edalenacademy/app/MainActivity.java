@@ -38,6 +38,7 @@ import androidx.fragment.app.FragmentActivity;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
@@ -480,38 +481,38 @@ public class MainActivity extends FragmentActivity {
     private void syncCurrentSupabaseSession() {
         if (webView == null) return;
 
-        /*
-         * evaluateJavascript's callback receives the SYNCHRONOUS completion
-         * value of the script. "(async function(){...})()" evaluates
-         * synchronously to a pending Promise, not the eventual resolved
-         * value, so a "return" from inside the async body never reaches the
-         * Java callback here (it always arrives as null, before the await
-         * even settles). Instead, have the script report the result back
-         * through the native bridge directly once it actually has it.
-         */
         String script =
                 "(async function(){"
                         + "try{"
-                        + "if(!window.sb||!sb.auth)return;"
+                        + "if(!window.sb||!sb.auth)return '';"
                         + "var r=await sb.auth.getSession();"
-                        + "if(!r||!r.data||!r.data.session)return;"
+                        + "if(!r||!r.data||!r.data.session)return '';"
                         + "var s=r.data.session;"
                         + "var u=(window.AppState&&AppState.user)?AppState.user:null;"
                         + "var o={access_token:s.access_token,refresh_token:s.refresh_token,user:u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null};"
-                        + "if(window.EdalenNative&&EdalenNative.reportSyncedSession){"
-                        + "EdalenNative.reportSyncedSession('OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o)))));"
-                        + "}"
-                        + "}catch(e){}"
+                        + "return 'OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o))));"
+                        + "}catch(e){return '';}"
                         + "})()";
 
-        webView.evaluateJavascript(script, null);
-    }
+        webView.evaluateJavascript(script, value -> {
+            String encoded = extractJavascriptString(value);
+            if (encoded == null || !encoded.startsWith("OK:")) return;
 
-    private void handleSyncedSessionResult(String encoded) {
-        if (encoded == null || !encoded.startsWith("OK:")) return;
+            /*
+             * BUG FIX: this previously saved the current session on every
+             * single page load for every user, whether or not they had ever
+             * turned on biometric login. That silently enrolled everyone
+             * into the biometric-lock flow, and combined with Supabase's
+             * rotating refresh tokens, produced a login -> lock -> "session
+             * expired" loop for people who never asked for biometric login
+             * in the first place. Only keep the stored session in sync if
+             * the user has already explicitly enabled it.
+             */
+            if (!hasStoredBiometricSession()) return;
 
-        JSONObject session = decodeBase64Json(encoded.substring(3));
-        if (session != null) saveEncryptedSession(session);
+            JSONObject session = decodeBase64Json(encoded.substring(3));
+            if (session != null) saveEncryptedSession(session);
+        });
     }
 
     /*
@@ -530,29 +531,10 @@ public class MainActivity extends FragmentActivity {
             return;
         }
 
-        /*
-         * As in syncCurrentSupabaseSession(): evaluateJavascript's callback
-         * only ever sees the synchronous completion value of the script,
-         * which for "(async function(){...})()" is a pending Promise, not
-         * the resolved result. The old code's "return 'OK:...'" / "return
-         * 'ERROR:...'" from inside the async body could never actually
-         * reach the Java callback -> the callback always fired almost
-         * immediately with a null/empty value, well before
-         * "await sb.auth.getSession()" (or the refresh/localStorage
-         * fallback) had actually finished. That produced the
-         * "could not read the current login session" error on every
-         * attempt, regardless of whether a session existed.
-         *
-         * Fix: the script reports its outcome through the native bridge
-         * itself (a real JS-to-Java call, which is not subject to this
-         * limitation) once it actually has an answer, instead of trying to
-         * hand it back via evaluateJavascript's return value.
-         */
         String script =
                 "(async function(){"
                         + "function pack(o){return 'OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o))));}"
                         + "function userObj(){var u=(window.AppState&&AppState.user)?AppState.user:null;return u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null;}"
-                        + "function finish(v){try{if(window.EdalenNative&&EdalenNative.reportCapturedSession)EdalenNative.reportCapturedSession(v);}catch(e){}}"
                         + "try{"
                         + "var session=null;"
                         + "if(window.sb&&sb.auth){"
@@ -568,75 +550,85 @@ public class MainActivity extends FragmentActivity {
                         + "}catch(e){}"
                         + "}"
                         + "if(!session||!session.access_token||!session.refresh_token){"
-                        + "finish('ERROR:'+btoa(unescape(encodeURIComponent('The current Supabase login session could not be found. Please remain on the account screen for a moment and try again.'))));"
-                        + "return;"
+                        + "return 'ERROR:'+btoa(unescape(encodeURIComponent('The current Supabase login session could not be found. Please remain on the account screen for a moment and try again.')));"
                         + "}"
-                        + "finish(pack({access_token:session.access_token,refresh_token:session.refresh_token,user:userObj()}));"
+                        + "return pack({access_token:session.access_token,refresh_token:session.refresh_token,user:userObj()});"
                         + "}catch(e){"
-                        + "finish('ERROR:'+btoa(unescape(encodeURIComponent(e&&e.message?e.message:'Could not read the current login session.'))));"
+                        + "return 'ERROR:'+btoa(unescape(encodeURIComponent(e&&e.message?e.message:'Could not read the current login session.')));"
                         + "}"
                         + "})()";
 
-        webView.evaluateJavascript(script, null);
+        webView.evaluateJavascript(script, value -> {
+            try {
+                String encoded = extractJavascriptString(value);
+
+                if (encoded == null || encoded.trim().isEmpty()) {
+                    biometricBridge.sendBiometricError(
+                            "The app could not read the current login session. Please stay on this screen and try again."
+                    );
+                    return;
+                }
+
+                if (encoded.startsWith("ERROR:")) {
+                    String message = decodeBase64Text(encoded.substring(6));
+                    biometricBridge.sendBiometricError(
+                            message == null || message.trim().isEmpty()
+                                    ? "Could not read the current login session."
+                                    : message
+                    );
+                    return;
+                }
+
+                if (!encoded.startsWith("OK:")) {
+                    biometricBridge.sendBiometricError(
+                            "Could not read the current login session. Please try again."
+                    );
+                    return;
+                }
+
+                JSONObject session = decodeBase64Json(encoded.substring(3));
+                if (session == null) {
+                    biometricBridge.sendBiometricError(
+                            "Could not read the current login session. Please try again."
+                    );
+                    return;
+                }
+
+                String accessToken = session.optString("access_token", "");
+                String refreshToken = session.optString("refresh_token", "");
+
+                if (accessToken.isEmpty() || refreshToken.isEmpty()) {
+                    biometricBridge.sendBiometricError(
+                            "Your current login session is incomplete. Please log in again."
+                    );
+                    return;
+                }
+
+                if (!saveEncryptedSession(session)) {
+                    biometricBridge.sendBiometricError(
+                            "The phone could not securely save the biometric sign-in. Please try again."
+                    );
+                    return;
+                }
+
+                biometricBridge.sendBiometricSuccess("enable");
+
+            } catch (Exception e) {
+                biometricBridge.sendBiometricError(
+                        "Could not save the biometric sign-in. Please try again."
+                );
+            }
+        });
     }
 
-    private void handleCapturedSessionResult(String encoded) {
+    private String extractJavascriptString(String value) {
+        if (value == null || "null".equals(value)) return null;
+
         try {
-            if (encoded == null || encoded.trim().isEmpty()) {
-                biometricBridge.sendBiometricError(
-                        "The app could not read the current login session. Please stay on this screen and try again."
-                );
-                return;
-            }
-
-            if (encoded.startsWith("ERROR:")) {
-                String message = decodeBase64Text(encoded.substring(6));
-                biometricBridge.sendBiometricError(
-                        message == null || message.trim().isEmpty()
-                                ? "Could not read the current login session."
-                                : message
-                );
-                return;
-            }
-
-            if (!encoded.startsWith("OK:")) {
-                biometricBridge.sendBiometricError(
-                        "Could not read the current login session. Please try again."
-                );
-                return;
-            }
-
-            JSONObject session = decodeBase64Json(encoded.substring(3));
-            if (session == null) {
-                biometricBridge.sendBiometricError(
-                        "Could not read the current login session. Please try again."
-                );
-                return;
-            }
-
-            String accessToken = session.optString("access_token", "");
-            String refreshToken = session.optString("refresh_token", "");
-
-            if (accessToken.isEmpty() || refreshToken.isEmpty()) {
-                biometricBridge.sendBiometricError(
-                        "Your current login session is incomplete. Please log in again."
-                );
-                return;
-            }
-
-            if (!saveEncryptedSession(session)) {
-                biometricBridge.sendBiometricError(
-                        "The phone could not securely save the biometric sign-in. Please try again."
-                );
-                return;
-            }
-
-            biometricBridge.sendBiometricSuccess("enable");
-
+            Object parsed = new JSONTokener(value).nextValue();
+            return parsed instanceof String ? (String) parsed : null;
         } catch (Exception e) {
-            biometricBridge.sendBiometricError(
-                    "Could not save the biometric sign-in. Please try again."
-            );
+            return null;
         }
     }
 
@@ -675,6 +667,12 @@ public class MainActivity extends FragmentActivity {
         String refreshToken = stored.optString("refresh_token", "");
 
         if (accessToken.isEmpty() || refreshToken.isEmpty()) {
+            /*
+             * BUG FIX: an incomplete saved session is unrecoverable, so
+             * clear it instead of leaving it in place to fail the exact
+             * same way on the next attempt.
+             */
+            clearStoredBiometricSession();
             callJavascript(
                     "window.nativeBiometricError&&window.nativeBiometricError("
                             + JSONObject.quote(
@@ -695,6 +693,18 @@ public class MainActivity extends FragmentActivity {
                         + ",refresh_token:" + JSONObject.quote(refreshToken)
                         + "}";
 
+        /*
+         * BUG FIX: this used to decide success/failure entirely inside the
+         * JS string and call window.nativeBiometricSuccess /
+         * nativeBiometricError itself. That meant Java never learned when
+         * the saved refresh token was rejected (most commonly because
+         * Supabase had already rotated it), so the same dead token stayed
+         * in SharedPreferences and was retried, and failed the same way,
+         * on every future unlock attempt -- an endless
+         * lock -> "expired" -> login loop. Now the script only reports
+         * OK/ERROR back to Java, and Java decides what to do, including
+         * clearing the stale session on failure.
+         */
         String script =
                 "(async function(){"
                         + "try{"
@@ -707,17 +717,28 @@ public class MainActivity extends FragmentActivity {
                         + "if(window.AppState)AppState.biometricLockPending=false;"
                         + "if(typeof navigate==='function')navigate('#/dashboard');"
                         + "if(typeof render==='function')render();"
-                        + "if(window.nativeBiometricSuccess)window.nativeBiometricSuccess("
-                        + JSONObject.quote(action) + ");"
+                        + "return 'OK';"
                         + "}catch(e){"
-                        + "if(window.nativeBiometricError)window.nativeBiometricError("
-                        + JSONObject.quote(
-                        "Your saved sign-in has expired or is no longer valid. Please log in with your password."
-                ) + ");"
+                        + "return 'ERROR';"
                         + "}"
                         + "})()";
 
-        webView.evaluateJavascript(script, null);
+        webView.evaluateJavascript(script, value -> {
+            String result = extractJavascriptString(value);
+
+            if ("OK".equals(result)) {
+                biometricBridge.sendBiometricSuccess(action);
+                return;
+            }
+
+            clearStoredBiometricSession();
+            callJavascript("window.render&&window.render();");
+
+            biometricBridge.sendBiometricError(
+                    "Your saved sign-in has expired. Please log in with your "
+                            + "password, then turn fingerprint / Face ID login back on."
+            );
+        });
     }
 
     private void callJavascript(String javascript) {
@@ -1042,27 +1063,6 @@ public class MainActivity extends FragmentActivity {
             });
         }
 
-        /*
-         * Called directly by the injected JS once
-         * captureCurrentSessionForBiometric()'s async lookup actually has an
-         * answer (either "OK:<base64 session>" or "ERROR:<base64 message>").
-         * This is a real JS-to-Java bridge call, so unlike a value returned
-         * from an async IIFE passed to evaluateJavascript, it is guaranteed
-         * to arrive only once the lookup has genuinely finished.
-         */
-        @JavascriptInterface
-        public void reportCapturedSession(String encoded) {
-            activity.runOnUiThread(() -> handleCapturedSessionResult(encoded));
-        }
-
-        /*
-         * Same idea for the periodic background session sync.
-         */
-        @JavascriptInterface
-        public void reportSyncedSession(String encoded) {
-            activity.runOnUiThread(() -> handleSyncedSessionResult(encoded));
-        }
-
         private void authenticateNative() {
             activity.runOnUiThread(() -> {
                 if (!isBiometricAvailable()) {
@@ -1111,6 +1111,22 @@ public class MainActivity extends FragmentActivity {
                                     CharSequence errString
                             ) {
                                 super.onAuthenticationError(errorCode, errString);
+
+                                /*
+                                 * BUG FIX: the user tapping "Cancel" or the
+                                 * system dismissing the prompt (e.g. to fall
+                                 * back to another app) is not a failure and
+                                 * should not surface a scary error message.
+                                 */
+                                boolean userDismissed =
+                                        errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                                                || errorCode == BiometricPrompt.ERROR_USER_CANCELED
+                                                || errorCode == BiometricPrompt.ERROR_CANCELED;
+
+                                if (userDismissed) {
+                                    return;
+                                }
+
                                 sendBiometricError(
                                         errString != null
                                                 ? errString.toString()
