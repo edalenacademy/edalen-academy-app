@@ -3,7 +3,6 @@ package com.edalenacademy.app;
 import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -12,14 +11,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
-import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.webkit.CookieManager;
-import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -31,23 +26,11 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
-import androidx.biometric.BiometricManager;
-import androidx.biometric.BiometricPrompt;
-import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
-import org.json.JSONObject;
-
-import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.ArrayList;
-import java.util.concurrent.Executor;
-
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
 
 public class MainActivity extends FragmentActivity {
 
@@ -57,32 +40,24 @@ public class MainActivity extends FragmentActivity {
     private static final String APP_URL =
             "file:///android_asset/index.html";
 
-    private static final String KEYSTORE_NAME =
-            "AndroidKeyStore";
-
-    /* New alias prevents stale biometric data from the earlier implementation. */
-    private static final String BIOMETRIC_KEY_ALIAS =
-            "EdalenAcademyBiometricSessionKeyV4";
-
-    private static final String PREFS_NAME =
+    /*
+     * Names of the SharedPreferences file and Keystore alias the old,
+     * now-removed biometric login feature used to use. Kept only long
+     * enough to wipe any leftover data from devices that had biometric
+     * login enabled before it was removed -- see cleanupLegacyBiometricData().
+     */
+    private static final String LEGACY_BIOMETRIC_PREFS_NAME =
             "edalen_native_biometric";
 
-    private static final String PREF_CIPHERTEXT =
-            "encrypted_session";
-
-    private static final String PREF_IV =
-            "session_iv";
-
-    private static final String PREF_USER =
-            "user_info";
+    private static final String LEGACY_BIOMETRIC_KEY_ALIAS =
+            "EdalenAcademyBiometricSessionKeyV4";
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
     private SwipeRefreshLayout swipeRefreshLayout;
-    private NativeBiometricBridge biometricBridge;
+    private Button refreshButton;
     private PermissionRequest pendingPermissionRequest;
     private boolean isRefreshing = false;
-    private String pendingBiometricAction = "";
 
     private final Handler handler =
             new Handler(Looper.getMainLooper());
@@ -90,6 +65,8 @@ public class MainActivity extends FragmentActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        cleanupLegacyBiometricData();
 
         Window window = getWindow();
         window.setStatusBarColor(Color.rgb(246, 243, 236));
@@ -160,9 +137,6 @@ public class MainActivity extends FragmentActivity {
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setBackgroundColor(Color.WHITE);
 
-        biometricBridge = new NativeBiometricBridge(this);
-        webView.addJavascriptInterface(biometricBridge, "EdalenNative");
-
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(
@@ -224,14 +198,22 @@ public class MainActivity extends FragmentActivity {
                     swipeRefreshLayout.setRefreshing(false);
                 }
 
-                installNativeBiometricJavascript();
+                /*
+                 * BUG FIX: the retry FAB was created and fully wired up with
+                 * a click listener, but was left permanently hidden
+                 * (View.GONE) with nothing anywhere that ever made it
+                 * visible again -- a dead button the user could never
+                 * actually see or use. It's meant to give the user a manual
+                 * way to retry when a page load fails (pull-to-refresh is
+                 * intentionally disabled on this screen), so hide it on a
+                 * successful load and show it on a failed one (see
+                 * onReceivedError below).
+                 */
+                if (refreshButton != null) {
+                    refreshButton.setVisibility(View.GONE);
+                }
 
-                handler.postDelayed(
-                        () -> enforceNativeBiometricLock(),
-                        700
-                );
-
-                syncCurrentSupabaseSession();
+                disableBiometricWebUi();
             }
 
             @Override
@@ -245,6 +227,9 @@ public class MainActivity extends FragmentActivity {
                 isRefreshing = false;
                 if (swipeRefreshLayout != null) {
                     swipeRefreshLayout.setRefreshing(false);
+                }
+                if (refreshButton != null) {
+                    refreshButton.setVisibility(View.VISIBLE);
                 }
             }
         });
@@ -318,7 +303,7 @@ public class MainActivity extends FragmentActivity {
             }
         });
 
-        Button refreshButton = new Button(this);
+        refreshButton = new Button(this);
         refreshButton.setText("\u21BB");
         refreshButton.setTextSize(23);
         refreshButton.setTextColor(Color.WHITE);
@@ -377,433 +362,63 @@ public class MainActivity extends FragmentActivity {
         webView.reload();
     }
 
-    private void installNativeBiometricJavascript() {
+    /*
+     * Biometric login has been removed from the app. This does not touch
+     * index.html/the web bundle (only this native wrapper is editable
+     * here), so rather than leaving the page to fall back to whatever
+     * WebAuthn-based implementation it may already have, this explicitly
+     * defines every hook the page used to call into the native biometric
+     * bridge as an inert no-op: no biometric card is shown in Settings, the
+     * "Enable fingerprint login" flow does nothing, and the biometric lock
+     * screen can never be triggered.
+     */
+    private void disableBiometricWebUi() {
         if (webView == null) return;
 
-        /*
-         * This intentionally replaces the WebAuthn/passkey check in the HTML
-         * with the real Android BiometricPrompt bridge.
-         */
         String script =
                 "(function(){"
-                        + "if(!window.EdalenNative)return;"
-
-                        + "window.biometricSupported=function(){"
-                        + "try{return !!(window.EdalenNative&&EdalenNative.isBiometricAvailable&&EdalenNative.isBiometricAvailable());}catch(e){return false;}"
-                        + "};"
-
-                        + "window.biometricSettingsCardHtml=function(u){"
-                        + "if(!u||!u.id)return '';"
-                        + "var enabled=false;"
-                        + "try{enabled=!!EdalenNative.hasStoredSession();}catch(e){}"
-                        + "return '<div class=\"card\"><div class=\"card-title\">Biometric login</div>'"
-                        + "+'<p style=\"color:var(--text-soft);\">'"
-                        + "+(enabled"
-                        + "?'Fingerprint / Face ID login is <b>on</b> for this device. You will be asked to verify before the app opens.'"
-                        + ":'Turn on fingerprint or Face ID to secure this app on this device. You can then use your fingerprint or Face ID instead of typing your password.')"
-                        + "+'</p>'"
-                        + "+(enabled"
-                        + "?'<button class=\"btn btn-ghost\" data-action=\"disable-biometric\">Turn off biometric login</button>'"
-                        + ":'<button class=\"btn btn-primary\" data-action=\"enable-biometric\">Enable fingerprint login</button>')"
-                        + "+'</div>';"
-                        + "};"
-
+                        + "window.biometricSupported=function(){return false;};"
+                        + "window.biometricSettingsCardHtml=function(){return '';};"
                         + "window.enableBiometricLogin=function(){"
-                        + "try{"
-                        + "if(!EdalenNative.isBiometricAvailable()){"
-                        + "if(typeof toast==='function')toast('No fingerprint or Face ID is available on this device.');return;}"
-                        + "if(typeof toast==='function')toast('Hold on pls… verifying your fingerprint or Face ID.');"
-                        + "EdalenNative.enableBiometric();"
-                        + "}catch(e){if(typeof toast==='function')toast('Could not start biometric login.');}"
+                        + "if(typeof toast==='function')toast('Biometric login is not available in this app.');"
                         + "};"
-
-                        + "window.disableBiometricLogin=function(){"
-                        + "try{EdalenNative.disableBiometric();}"
-                        + "catch(e){if(typeof toast==='function')toast('Could not remove biometric login.');}"
-                        + "};"
-
-                        + "window.attemptBiometricUnlock=function(){"
-                        + "try{"
-                        + "if(!EdalenNative.hasStoredSession()){if(typeof toast==='function')toast('Biometric login is not set up on this device.');return;}"
-                        + "if(typeof toast==='function')toast('Hold on pls… verifying your fingerprint or Face ID.');"
-                        + "EdalenNative.authenticateBiometric('unlock');"
-                        + "}catch(e){if(typeof toast==='function')toast('Biometric login is unavailable.');}"
-                        + "};"
-
-                        + "window.attemptBiometricLoginAtAuth=function(){"
-                        + "try{"
-                        + "if(!EdalenNative.hasStoredSession()){if(typeof toast==='function')toast('No biometric login is saved on this device.');return;}"
-                        + "if(typeof toast==='function')toast('Hold on pls… verifying your fingerprint or Face ID.');"
-                        + "EdalenNative.authenticateBiometric('login');"
-                        + "}catch(e){if(typeof toast==='function')toast('Biometric login is unavailable.');}"
-                        + "};"
-
-                        + "window.biometricLoginInfo=function(){"
-                        + "try{return EdalenNative.isBiometricAvailable()?{available:true}:null;}catch(e){return null;}"
-                        + "};"
-
-                        + "window.nativeBiometricSuccess=function(action){"
-                        + "if(action==='enable'){"
-                        + "if(typeof toast==='function')toast('Fingerprint / Face ID login enabled on this device.');"
-                        + "if(typeof render==='function')render();return;}"
+                        + "window.disableBiometricLogin=function(){};"
+                        + "window.attemptBiometricUnlock=function(){};"
+                        + "window.attemptBiometricLoginAtAuth=function(){};"
+                        + "window.biometricLoginInfo=function(){return null;};"
+                        + "window.nativeBiometricSuccess=function(){};"
+                        + "window.nativeBiometricError=function(){};"
                         + "if(window.AppState)AppState.biometricLockPending=false;"
-                        + "if(typeof toast==='function')toast('Hold on pls… signing you in.');"
-                        + "if(typeof render==='function')render();"
-                        + "};"
-
-                        + "window.nativeBiometricError=function(message){"
-                        + "if(typeof toast==='function')toast(message||'Biometric verification failed.');"
-                        + "};"
-
                         + "if(typeof render==='function')setTimeout(function(){try{render();}catch(e){}},50);"
                         + "})();";
 
         webView.evaluateJavascript(script, null);
     }
 
-    private void enforceNativeBiometricLock() {
-        if (webView == null || biometricBridge == null || !biometricBridge.hasStoredSession()) {
-            return;
-        }
-
-        String script =
-                "(function(){"
-                        + "if(window.AppState&&AppState.session&&AppState.user){"
-                        + "AppState.biometricLockPending=true;"
-                        + "if(typeof render==='function')render();"
-                        + "}"
-                        + "})();";
-
-        webView.evaluateJavascript(script, null);
-    }
-
-    private void syncCurrentSupabaseSession() {
-        if (webView == null) return;
-
-        /*
-         * BUG FIX: WebView.evaluateJavascript() captures the script's
-         * *synchronous* completion value. For an async IIFE like this one,
-         * that synchronous value is a pending Promise, not the eventual
-         * resolved result -- it does not reliably wait for `await`s inside
-         * the script to finish. That made this callback intermittently
-         * receive null/empty results, especially whenever Supabase actually
-         * had to do real async work. Instead of returning a value, the
-         * script now calls straight into a JavascriptInterface method once
-         * it's genuinely done, which is delivered reliably regardless of
-         * timing.
-         */
-        String script =
-                "(async function(){"
-                        + "try{"
-                        + "if(!window.sb||!sb.auth){EdalenNative.reportSyncResult('');return;}"
-                        + "var r=await sb.auth.getSession();"
-                        + "if(!r||!r.data||!r.data.session){EdalenNative.reportSyncResult('');return;}"
-                        + "var s=r.data.session;"
-                        + "var u=(window.AppState&&AppState.user)?AppState.user:null;"
-                        + "var o={access_token:s.access_token,refresh_token:s.refresh_token,user:u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null};"
-                        + "EdalenNative.reportSyncResult('OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o)))));"
-                        + "}catch(e){EdalenNative.reportSyncResult('');}"
-                        + "})()";
-
-        webView.evaluateJavascript(script, null);
-    }
-
     /*
-     * Main correction:
-     * - first ask Supabase directly for the current session;
-     * - if that is temporarily unavailable, read Supabase's persisted local
-     *   auth record as a fallback;
-     * - refresh the session once if a refresh token exists;
-     * - only then pass the session to Java, via an explicit bridge call
-     *   (see the BUG FIX note in syncCurrentSupabaseSession above -- the
-     *   old evaluateJavascript return-value approach was unreliable for
-     *   async scripts, and this exact function was the source of the
-     *   "The app could not read the current login session" error).
+     * One-time cleanup for devices that had the old biometric login feature
+     * enabled before it was removed: wipes the SharedPreferences file it
+     * used to store an encrypted session, and deletes its Android Keystore
+     * key. Safe to call on every launch -- both are no-ops once the data
+     * is gone.
      */
-    private void captureCurrentSessionForBiometric() {
-        if (webView == null) {
-            biometricBridge.sendBiometricError(
-                    "The login session is not ready yet. Please wait a moment and try again."
-            );
-            return;
-        }
-
-        String script =
-                "(async function(){"
-                        + "function pack(o){return 'OK:'+btoa(unescape(encodeURIComponent(JSON.stringify(o))));}"
-                        + "function userObj(){var u=(window.AppState&&AppState.user)?AppState.user:null;return u?{id:u.id,name:u.name||'',username:u.username||'',email:u.email||''}:null;}"
-                        + "try{"
-                        + "var session=null;"
-                        + "if(window.sb&&sb.auth){"
-                        + "try{var r=await sb.auth.getSession();if(r&&r.data&&r.data.session)session=r.data.session;}catch(e){}"
-                        + "if(!session){"
-                        + "try{var rr=await sb.auth.refreshSession();if(rr&&rr.data&&rr.data.session)session=rr.data.session;}catch(e){}"
-                        + "}"
-                        + "}"
-                        + "if(!session){"
-                        + "try{"
-                        + "var raw=localStorage.getItem('sb-pnipgbtssereeoxchfdn-auth-token');"
-                        + "if(raw){var saved=JSON.parse(raw);if(saved&&saved.access_token)session=saved;}"
-                        + "}catch(e){}"
-                        + "}"
-                        + "if(!session||!session.access_token||!session.refresh_token){"
-                        + "EdalenNative.reportCaptureResult('ERROR:'+btoa(unescape(encodeURIComponent('The current Supabase login session could not be found. Please remain on the account screen for a moment and try again.'))));"
-                        + "return;"
-                        + "}"
-                        + "EdalenNative.reportCaptureResult(pack({access_token:session.access_token,refresh_token:session.refresh_token,user:userObj()}));"
-                        + "}catch(e){"
-                        + "EdalenNative.reportCaptureResult('ERROR:'+btoa(unescape(encodeURIComponent(e&&e.message?e.message:'Could not read the current login session.'))));"
-                        + "}"
-                        + "})()";
-
-        webView.evaluateJavascript(script, null);
-    }
-
-    private JSONObject decodeBase64Json(String encoded) {
+    private void cleanupLegacyBiometricData() {
         try {
-            byte[] bytes = Base64.decode(encoded, Base64.DEFAULT);
-            return new JSONObject(new String(bytes, StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private String decodeBase64Text(String encoded) {
-        try {
-            byte[] bytes = Base64.decode(encoded, Base64.DEFAULT);
-            return new String(bytes, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private void restoreStoredSession(String action) {
-        JSONObject stored = loadEncryptedSession();
-
-        if (stored == null) {
-            callJavascript(
-                    "window.nativeBiometricError&&window.nativeBiometricError("
-                            + JSONObject.quote(
-                            "Your saved biometric sign-in is unavailable. Please log in normally."
-                    ) + ");"
-            );
-            return;
-        }
-
-        String accessToken = stored.optString("access_token", "");
-        String refreshToken = stored.optString("refresh_token", "");
-
-        if (accessToken.isEmpty() || refreshToken.isEmpty()) {
-            /*
-             * BUG FIX: an incomplete saved session is unrecoverable, so
-             * clear it instead of leaving it in place to fail the exact
-             * same way on the next attempt.
-             */
-            clearStoredBiometricSession();
-            callJavascript(
-                    "window.nativeBiometricError&&window.nativeBiometricError("
-                            + JSONObject.quote(
-                            "Your saved sign-in is unavailable. Please log in normally."
-                    ) + ");"
-            );
-            return;
-        }
-
-        callJavascript(
-                "window.toast&&window.toast("
-                        + JSONObject.quote("Hold on pls… signing you in.")
-                        + ");"
-        );
-
-        String sessionObject =
-                "{access_token:" + JSONObject.quote(accessToken)
-                        + ",refresh_token:" + JSONObject.quote(refreshToken)
-                        + "}";
-
-        /*
-         * BUG FIX: same class of bug as syncCurrentSupabaseSession and
-         * captureCurrentSessionForBiometric above -- relying on
-         * evaluateJavascript's return value for an async script is
-         * unreliable. The script now calls a bridge method explicitly once
-         * it's actually done, and Java decides what to do from there,
-         * including clearing a stale/rejected session so it isn't retried
-         * forever (the login -> lock -> "expired" loop).
-         */
-        String script =
-                "(async function(){"
-                        + "try{"
-                        + "if(!window.sb||!sb.auth)throw new Error('Authentication service is not ready.');"
-                        + "var r=await sb.auth.setSession(" + sessionObject + ");"
-                        + "if(r.error)throw new Error(r.error.message||'Could not restore your session.');"
-                        + "if(window.AppState)AppState.session=r.data.session;"
-                        + "if(typeof loadUserData==='function')await loadUserData();"
-                        + "if(typeof loadAnnouncements==='function')loadAnnouncements(true);"
-                        + "if(window.AppState)AppState.biometricLockPending=false;"
-                        + "if(typeof navigate==='function')navigate('#/dashboard');"
-                        + "if(typeof render==='function')render();"
-                        + "EdalenNative.reportRestoreResult('OK'," + JSONObject.quote(action) + ");"
-                        + "}catch(e){"
-                        + "EdalenNative.reportRestoreResult('ERROR'," + JSONObject.quote(action) + ");"
-                        + "}"
-                        + "})()";
-
-        webView.evaluateJavascript(script, null);
-    }
-
-    private void callJavascript(String javascript) {
-        if (webView == null) return;
-        webView.post(() -> webView.evaluateJavascript(javascript, null));
-    }
-
-    private SecretKey getOrCreateEncryptionKey() throws Exception {
-        KeyStore keyStore = KeyStore.getInstance(KEYSTORE_NAME);
-        keyStore.load(null);
-
-        if (keyStore.containsAlias(BIOMETRIC_KEY_ALIAS)) {
-            return (SecretKey) keyStore.getKey(BIOMETRIC_KEY_ALIAS, null);
-        }
-
-        KeyGenerator keyGenerator = KeyGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES,
-                KEYSTORE_NAME
-        );
-
-        KeyGenParameterSpec spec = new KeyGenParameterSpec.Builder(
-                BIOMETRIC_KEY_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT
-        )
-                .setKeySize(256)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .build();
-
-        keyGenerator.init(spec);
-        return keyGenerator.generateKey();
-    }
-
-    private boolean saveEncryptedSession(JSONObject session) {
-        try {
-            SecretKey key = getOrCreateEncryptionKey();
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, key);
-
-            byte[] plaintext = session.toString().getBytes(StandardCharsets.UTF_8);
-            byte[] encrypted = cipher.doFinal(plaintext);
-            byte[] iv = cipher.getIV();
-
-            if (iv == null || iv.length == 0 || encrypted.length == 0) {
-                return false;
-            }
-
-            SharedPreferences prefs = getSharedPreferences(
-                    PREFS_NAME,
-                    Context.MODE_PRIVATE
-            );
-
-            JSONObject user = session.optJSONObject("user");
-
-            boolean committed = prefs.edit()
-                    .putString(
-                            PREF_CIPHERTEXT,
-                            Base64.encodeToString(encrypted, Base64.NO_WRAP)
-                    )
-                    .putString(
-                            PREF_IV,
-                            Base64.encodeToString(iv, Base64.NO_WRAP)
-                    )
-                    .putString(
-                            PREF_USER,
-                            user != null ? user.toString() : ""
-                    )
-                    .commit();
-
-            if (!committed) return false;
-            return hasStoredBiometricSession();
-
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private JSONObject loadEncryptedSession() {
-        try {
-            SharedPreferences prefs = getSharedPreferences(
-                    PREFS_NAME,
-                    Context.MODE_PRIVATE
-            );
-
-            String encryptedText = prefs.getString(PREF_CIPHERTEXT, null);
-            String ivText = prefs.getString(PREF_IV, null);
-
-            if (encryptedText == null || ivText == null
-                    || encryptedText.isEmpty() || ivText.isEmpty()) {
-                return null;
-            }
-
-            byte[] encrypted = Base64.decode(encryptedText, Base64.NO_WRAP);
-            byte[] iv = Base64.decode(ivText, Base64.NO_WRAP);
-
-            SecretKey key = getOrCreateEncryptionKey();
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(
-                    Cipher.DECRYPT_MODE,
-                    key,
-                    new GCMParameterSpec(128, iv)
-            );
-
-            byte[] decrypted = cipher.doFinal(encrypted);
-
-            return new JSONObject(
-                    new String(decrypted, StandardCharsets.UTF_8)
-            );
-
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private void clearStoredBiometricSession() {
-        try {
-            SharedPreferences prefs = getSharedPreferences(
-                    PREFS_NAME,
-                    Context.MODE_PRIVATE
-            );
-
-            prefs.edit()
-                    .remove(PREF_CIPHERTEXT)
-                    .remove(PREF_IV)
-                    .remove(PREF_USER)
+            getSharedPreferences(LEGACY_BIOMETRIC_PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .clear()
                     .commit();
         } catch (Exception ignored) {
         }
-    }
 
-    private JSONObject getStoredUser() {
         try {
-            SharedPreferences prefs = getSharedPreferences(
-                    PREFS_NAME,
-                    Context.MODE_PRIVATE
-            );
-
-            String userText = prefs.getString(PREF_USER, null);
-            if (userText == null || userText.trim().isEmpty()) return null;
-            return new JSONObject(userText);
-        } catch (Exception e) {
-            return null;
+            KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+            keyStore.load(null);
+            if (keyStore.containsAlias(LEGACY_BIOMETRIC_KEY_ALIAS)) {
+                keyStore.deleteEntry(LEGACY_BIOMETRIC_KEY_ALIAS);
+            }
+        } catch (Exception ignored) {
         }
-    }
-
-    private boolean hasStoredBiometricSession() {
-        SharedPreferences prefs = getSharedPreferences(
-                PREFS_NAME,
-                Context.MODE_PRIVATE
-        );
-
-        String encrypted = prefs.getString(PREF_CIPHERTEXT, null);
-        String iv = prefs.getString(PREF_IV, null);
-
-        return encrypted != null && !encrypted.isEmpty()
-                && iv != null && !iv.isEmpty();
     }
 
     private void requestMediaPermissions(boolean needCamera, boolean needAudio) {
@@ -910,297 +525,10 @@ public class MainActivity extends FragmentActivity {
         handler.removeCallbacksAndMessages(null);
 
         if (webView != null) {
-            webView.removeJavascriptInterface("EdalenNative");
             webView.destroy();
             webView = null;
         }
 
         super.onDestroy();
-    }
-
-    public class NativeBiometricBridge {
-
-        private final MainActivity activity;
-
-        NativeBiometricBridge(MainActivity activity) {
-            this.activity = activity;
-        }
-
-        @JavascriptInterface
-        public boolean isBiometricAvailable() {
-            BiometricManager manager = BiometricManager.from(activity);
-
-            int result = manager.canAuthenticate(
-                    BiometricManager.Authenticators.BIOMETRIC_STRONG
-                            | BiometricManager.Authenticators.BIOMETRIC_WEAK
-            );
-
-            return result == BiometricManager.BIOMETRIC_SUCCESS;
-        }
-
-        @JavascriptInterface
-        public boolean hasStoredSession() {
-            return hasStoredBiometricSession();
-        }
-
-        @JavascriptInterface
-        public String getStoredUser() {
-            JSONObject user = MainActivity.this.getStoredUser();
-            return user == null ? "null" : user.toString();
-        }
-
-        @JavascriptInterface
-        public void enableBiometric() {
-            pendingBiometricAction = "enable";
-            authenticateNative();
-        }
-
-        @JavascriptInterface
-        public void authenticateBiometric(String action) {
-            if (action == null || action.trim().isEmpty()) {
-                action = "login";
-            }
-            pendingBiometricAction = action;
-            authenticateNative();
-        }
-
-        @JavascriptInterface
-        public void disableBiometric() {
-            activity.runOnUiThread(() -> {
-                clearStoredBiometricSession();
-                callJavascript("window.render&&window.render();");
-            });
-        }
-
-        /*
-         * BUG FIX: called by syncCurrentSupabaseSession's script once it has
-         * genuinely finished (see the note in that method for why this
-         * replaces evaluateJavascript's async return value). Silently keeps
-         * the stored session current, but only for users who already
-         * explicitly enabled biometric login -- this must never be the
-         * thing that first creates a stored session.
-         */
-        @JavascriptInterface
-        public void reportSyncResult(String encoded) {
-            if (encoded == null || !encoded.startsWith("OK:")) return;
-            if (!hasStoredBiometricSession()) return;
-
-            JSONObject session = decodeBase64Json(encoded.substring(3));
-            if (session != null) saveEncryptedSession(session);
-        }
-
-        /*
-         * BUG FIX: called by captureCurrentSessionForBiometric's script once
-         * it has genuinely finished. This is the exact code path behind the
-         * "The app could not read the current login session" error -- it
-         * used to depend on evaluateJavascript's return value, which does
-         * not reliably wait for async work to complete.
-         */
-        @JavascriptInterface
-        public void reportCaptureResult(String encoded) {
-            try {
-                if (encoded == null || encoded.trim().isEmpty()) {
-                    sendBiometricError(
-                            "The app could not read the current login session. Please stay on this screen and try again."
-                    );
-                    return;
-                }
-
-                if (encoded.startsWith("ERROR:")) {
-                    String message = decodeBase64Text(encoded.substring(6));
-                    sendBiometricError(
-                            message == null || message.trim().isEmpty()
-                                    ? "Could not read the current login session."
-                                    : message
-                    );
-                    return;
-                }
-
-                if (!encoded.startsWith("OK:")) {
-                    sendBiometricError(
-                            "Could not read the current login session. Please try again."
-                    );
-                    return;
-                }
-
-                JSONObject session = decodeBase64Json(encoded.substring(3));
-                if (session == null) {
-                    sendBiometricError(
-                            "Could not read the current login session. Please try again."
-                    );
-                    return;
-                }
-
-                String accessToken = session.optString("access_token", "");
-                String refreshToken = session.optString("refresh_token", "");
-
-                if (accessToken.isEmpty() || refreshToken.isEmpty()) {
-                    sendBiometricError(
-                            "Your current login session is incomplete. Please log in again."
-                    );
-                    return;
-                }
-
-                if (!saveEncryptedSession(session)) {
-                    sendBiometricError(
-                            "The phone could not securely save the biometric sign-in. Please try again."
-                    );
-                    return;
-                }
-
-                sendBiometricSuccess("enable");
-
-            } catch (Exception e) {
-                sendBiometricError(
-                        "Could not save the biometric sign-in. Please try again."
-                );
-            }
-        }
-
-        /*
-         * BUG FIX: called by restoreStoredSession's script once it has
-         * genuinely finished. A rejected/expired stored session now gets
-         * cleared here so it isn't retried forever (the
-         * login -> lock -> "expired" loop).
-         */
-        @JavascriptInterface
-        public void reportRestoreResult(String result, String action) {
-            if ("OK".equals(result)) {
-                sendBiometricSuccess(action);
-                return;
-            }
-
-            clearStoredBiometricSession();
-            callJavascript("window.render&&window.render();");
-
-            sendBiometricError(
-                    "Your saved sign-in has expired. Please log in with your "
-                            + "password, then turn fingerprint / Face ID login back on."
-            );
-        }
-
-        private void authenticateNative() {
-            activity.runOnUiThread(() -> {
-                if (!isBiometricAvailable()) {
-                    sendBiometricError(
-                            "No fingerprint or Face ID is available on this device."
-                    );
-                    return;
-                }
-
-                Executor executor = ContextCompat.getMainExecutor(activity);
-
-                BiometricPrompt prompt = new BiometricPrompt(
-                        activity,
-                        executor,
-                        new BiometricPrompt.AuthenticationCallback() {
-                            @Override
-                            public void onAuthenticationSucceeded(
-                                    BiometricPrompt.AuthenticationResult result
-                            ) {
-                                super.onAuthenticationSucceeded(result);
-
-                                String action = pendingBiometricAction;
-
-                                if ("enable".equals(action)) {
-                                    callJavascript(
-                                            "window.toast&&window.toast("
-                                                    + JSONObject.quote(
-                                                    "Hold on pls… saving your biometric login."
-                                            ) + ");"
-                                    );
-                                    captureCurrentSessionForBiometric();
-                                } else {
-                                    callJavascript(
-                                            "window.toast&&window.toast("
-                                                    + JSONObject.quote(
-                                                    "Hold on pls… signing you in."
-                                            ) + ");"
-                                    );
-                                    restoreStoredSession(action);
-                                }
-                            }
-
-                            @Override
-                            public void onAuthenticationError(
-                                    int errorCode,
-                                    CharSequence errString
-                            ) {
-                                super.onAuthenticationError(errorCode, errString);
-
-                                /*
-                                 * BUG FIX: the user tapping "Cancel" or the
-                                 * system dismissing the prompt (e.g. to fall
-                                 * back to another app) is not a failure and
-                                 * should not surface a scary error message.
-                                 */
-                                boolean userDismissed =
-                                        errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                                                || errorCode == BiometricPrompt.ERROR_USER_CANCELED
-                                                || errorCode == BiometricPrompt.ERROR_CANCELED;
-
-                                if (userDismissed) {
-                                    return;
-                                }
-
-                                sendBiometricError(
-                                        errString != null
-                                                ? errString.toString()
-                                                : "Biometric verification was cancelled."
-                                );
-                            }
-
-                            @Override
-                            public void onAuthenticationFailed() {
-                                super.onAuthenticationFailed();
-                                callJavascript(
-                                        "window.toast&&window.toast("
-                                                + JSONObject.quote(
-                                                "Fingerprint or Face ID not recognized. Try again."
-                                        ) + ");"
-                                );
-                            }
-                        }
-                );
-
-                /* Non-CryptoObject flow allows strong and weak biometrics. */
-                BiometricPrompt.PromptInfo promptInfo =
-                        new BiometricPrompt.PromptInfo.Builder()
-                                .setTitle("Edalen Academy")
-                                .setSubtitle(
-                                        "Use your fingerprint or Face ID to continue"
-                                )
-                                .setNegativeButtonText("Cancel")
-                                .setAllowedAuthenticators(
-                                        BiometricManager.Authenticators.BIOMETRIC_STRONG
-                                                | BiometricManager.Authenticators.BIOMETRIC_WEAK
-                                )
-                                .build();
-
-                prompt.authenticate(promptInfo);
-            });
-        }
-
-        private void sendBiometricSuccess(String action) {
-            callJavascript(
-                    "window.nativeBiometricSuccess&&"
-                            + "window.nativeBiometricSuccess("
-                            + JSONObject.quote(action)
-                            + ");"
-            );
-        }
-
-        private void sendBiometricError(String message) {
-            callJavascript(
-                    "window.nativeBiometricError&&"
-                            + "window.nativeBiometricError("
-                            + JSONObject.quote(
-                            message == null
-                                    ? "Biometric verification failed."
-                                    : message
-                    )
-                            + ");"
-            );
-        }
     }
 }
