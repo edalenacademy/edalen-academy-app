@@ -38,7 +38,7 @@ public class MainActivity extends FragmentActivity {
     private static final int MEDIA_PERMISSION_REQUEST = 2001;
 
     private static final String APP_URL =
-            "https://edalenacademy.netlify.app/";
+            "https://edalenacademy.edalenacademy.workers.dev";
 
     /*
      * Names of the SharedPreferences file and Keystore alias the old,
