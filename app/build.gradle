@@ -1,7 +1,8 @@
-
 plugins {
     id 'com.android.application'
 }
+
+def playVersionCode = (project.findProperty('versionCodeOverride') ?: '1').toString().toInteger()
 
 android {
     namespace 'com.edalenacademy.app'
@@ -11,10 +12,8 @@ android {
         applicationId 'com.edalenacademy.app'
         minSdk 23
         targetSdk 36
-        /* The Play workflow passes the run number so every upload has a higher version code. */
-        versionCode (project.findProperty('versionCodeOverride') ?: '1').toInteger()
+        versionCode playVersionCode
         versionName '1.0'
-        /* true only for the Google Play build (workflow passes -PplayBuild=true). */
         buildConfigField 'boolean', 'PLAY_BUILD', project.hasProperty('playBuild') ? 'true' : 'false'
     }
 
