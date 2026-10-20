@@ -1,10 +1,10 @@
 
-name: Build Edalen Academy for Google Play (AAB)
+name: Build Edalen Academy APK
 
-# Run this by hand: Actions tab > "Build Edalen Academy for Google Play (AAB)" > Run workflow.
-# It makes the signed .aab file you upload to Google Play Console.
 on:
   workflow_dispatch:
+  push:
+    branches: ["main"]
 
 jobs:
   build:
@@ -23,24 +23,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.13"
+          gradle-version: "8.7"
 
-      - name: Restore upload key
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+      - name: Build APK
+        run: gradle assembleDebug
 
-      - name: Build signed AAB
-        env:
-          KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle bundleRelease -PplayBuild=true -PversionCodeOverride=${{ github.run_number }}
-
-      - name: Upload AAB
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: edalen-academy-play-aab
-          path: app/build/outputs/bundle/release/app-release.aab
+          name: edalen-academy-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          
